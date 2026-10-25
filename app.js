@@ -280,17 +280,20 @@
   };
 
   // ---------- Overpass: carrega uma ÁREA inteira (vias + radares + lombadas) e guarda no celular ----------
+  // Só servidores com cobertura mundial (overpass.osm.ch cobre apenas a Suíça e respondia "vazio" para o Brasil)
   const ENDPOINTS = [
     'https://overpass-api.de/api/interpreter',
     'https://lz4.overpass-api.de/api/interpreter',
     'https://z.overpass-api.de/api/interpreter',
-    'https://overpass.osm.ch/api/interpreter',
-    'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
     'https://overpass.private.coffee/api/interpreter',
+    'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
   ];
   const AREA = { rCity: 1200, rFast: 2500, rDownload: 1500, margin: 450, maxAge: 14 * 86400e3, maxCached: 60 };
   const HW_RE = '^(motorway|trunk|primary|secondary|tertiary|unclassified|residential|living_street|service|motorway_link|trunk_link|primary_link|secondary_link|tertiary_link)$';
-  let epIndex = 0, fetching = false, lastErr = '', lastFetchFail = 0, checkingCache = false;
+  // Para a área grande, deixa de fora "service" (estacionamentos, entradas de garagem): são milhares de vias
+  // sem limite em cidade grande e deixavam a resposta enorme e lenta.
+  const HW_RE_AREA = '^(motorway|trunk|primary|secondary|tertiary|unclassified|residential|living_street|motorway_link|trunk_link|primary_link|secondary_link|tertiary_link)$';
+  let epIndex = 0, fetching = false, fetchStart = 0, lastErr = '', lastFetchFail = 0, checkingCache = false;
   let area = null;        // {k, lat, lon, r, t, ways:[{i,h,n,m,f,b,c,o,g:[[lat,lon],...]}], nodes:[{i,k,lat,lon,m,n}]}
   let prevArea = null;    // área anterior, ainda usada até a nova cobrir a posição
   let areaIdx = [];       // metadados das áreas guardadas [{k, lat, lon, r, t}]
@@ -324,24 +327,35 @@
     return { ways, nodes };
   }
 
-  async function overpass(q, { timeoutMs = 20000, maxTries = ENDPOINTS.length } = {}) {
+  // onStatus(texto) é chamado a cada tentativa, para a tela mostrar o que está acontecendo.
+  // mustHaveWays: a área grande nunca pode vir vazia (toda área de 1 km numa cidade tem ruas);
+  // se vier, é servidor sem cobertura ou resposta cortada, então tenta o próximo.
+  async function overpass(q, { timeoutMs = 20000, maxTries = ENDPOINTS.length, onStatus = null, mustHaveWays = false } = {}) {
     const errs = [];
     for (let i = 0; i < maxTries; i++) {
       const idx = (epIndex + i) % ENDPOINTS.length, url = ENDPOINTS[idx];
-      const host = url.replace(/^https?:\/\//, '').split('/')[0];
+      const host = url.replace(/^https?:\/\//, '').split('/')[0].split('.')[0];
+      const ctrl = new AbortController();
+      // O tempo limite vale para a resposta INTEIRA (cabeçalho + corpo). Antes, o timer era cancelado
+      // assim que o servidor começava a responder, e um corpo que parava no meio deixava o app
+      // preso em "carregando mapa…" para sempre.
+      const to = setTimeout(() => ctrl.abort(), timeoutMs);
       try {
-        const ctrl = new AbortController(); const to = setTimeout(() => ctrl.abort(), timeoutMs);
-        const r = await fetch(url + '?data=' + encodeURIComponent(q), { signal: ctrl.signal, cache: 'no-store' });
-        clearTimeout(to);
+        if (onStatus) onStatus(`servidor ${i + 1}/${maxTries} (${host})`);
+        const r = await fetch(url + '?data=' + encodeURIComponent(q), { signal: ctrl.signal, cache: 'no-store', headers: { Accept: 'application/json' } });
         if (!r.ok) throw new Error('HTTP ' + r.status);
-        const j = await r.json();
-        if (j.remark && !(j.elements || []).length) throw new Error('limite do servidor');
+        const txt = await r.text();
+        let j;
+        try { j = JSON.parse(txt); } catch (e) { throw new Error('resposta inválida'); }
+        const els = j.elements || [];
+        if (j.remark && !els.length) throw new Error('limite do servidor');
+        if (mustHaveWays && !els.some(e => e.type === 'way')) throw new Error('resposta vazia');
         epIndex = idx;
         lastErr = '';
-        return j.elements || [];
+        return els;
       } catch (e) {
-        errs.push(host.split('.')[0] + ': ' + (e.name === 'AbortError' ? 'tempo esgotado' : (e.message || 'falha de rede')));
-      }
+        errs.push(host + ': ' + (e.name === 'AbortError' ? 'tempo esgotado' : (e.message || 'falha de rede')));
+      } finally { clearTimeout(to); }
     }
     epIndex = (epIndex + maxTries) % ENDPOINTS.length; // na próxima tentativa, começa por outros servidores
     lastErr = errs.join(' · ');
@@ -349,13 +363,13 @@
   }
   function areaQuery(c, r) {
     const at = `${r},${c.lat.toFixed(5)},${c.lon.toFixed(5)}`;
-    return `[out:json][timeout:20];(way(around:${at})["highway"~"${HW_RE}"];node(around:${at})["highway"="speed_camera"];node(around:${at})["traffic_calming"~"^(bump|hump|table|cushion|yes|rumble_strip|choker)$"];);out tags geom;`;
+    return `[out:json][timeout:20];(way(around:${at})["highway"~"${HW_RE_AREA}"];node(around:${at})["highway"="speed_camera"];node(around:${at})["traffic_calming"~"^(bump|hump|table|cushion|yes|rumble_strip|choker)$"];);out tags geom;`;
   }
   // Consulta rápida só da via onde estou (raio 60 m): responde em ~1 s e mostra o limite enquanto a área grande carrega
-  let quickBusy = false, lastQuick = 0;
+  let quickBusy = false, quickStart = 0, lastQuick = 0;
   async function quickLookup(pos) {
     if (quickBusy || Date.now() - lastQuick < 6000) return;
-    quickBusy = true; lastQuick = Date.now();
+    quickBusy = true; quickStart = Date.now(); lastQuick = Date.now();
     try {
       const q = `[out:json][timeout:8];way(around:60,${pos.lat.toFixed(5)},${pos.lon.toFixed(5)})["highway"~"${HW_RE}"];out tags geom;`;
       const els = await overpass(q, { timeoutMs: 9000, maxTries: 3 });
@@ -366,11 +380,19 @@
       if (!area) { mapStatus = 'serviço de mapas indisponível — ' + lastErr; render(); }
     } finally { quickBusy = false; }
   }
-  async function fetchArea(c, r) {
-    const els = await overpass(areaQuery(c, r), { timeoutMs: 22000, maxTries: 3 });
+  async function fetchArea(c, r, onStatus) {
+    const els = await overpass(areaQuery(c, r), { timeoutMs: 25000, maxTries: 3, onStatus, mustHaveWays: true });
     const a = Object.assign({ k: 'a:' + [c.lat.toFixed(4), c.lon.toFixed(4), r, Date.now()].join(','), lat: c.lat, lon: c.lon, r, t: Date.now() }, compact(els));
     await cachePut(a);
     return a;
+  }
+  // Cão de guarda: se uma consulta ficar presa (celular dormiu, rede sumiu no meio), libera a trava
+  // para o app tentar de novo em vez de ficar em "carregando mapa…" para sempre.
+  function watchdog() {
+    const now = Date.now();
+    if (fetching && now - fetchStart > 90000) { fetching = false; lastFetchFail = now; mapStatus = 'mapa demorou demais — tentando de novo'; render(); }
+    if (quickBusy && now - quickStart > 35000) quickBusy = false;
+    if (checkingCache && now - fetchStart > 20000) checkingCache = false;
   }
 
   // Cache de áreas (IndexedDB; cai para memória se não houver)
@@ -381,6 +403,8 @@
       if (!force && now - c.t > AREA.maxAge) continue;
       if (haversine(pos, c) < c.r - AREA.margin) {
         const a = await DB.get('areas', c.k);
+        // Área guardada sem nenhuma via (vinda de um servidor sem cobertura) não serve: apaga e segue
+        if (a && a.ways && !a.ways.length) { await DB.del('areas', c.k); await DB.del('meta', c.k); areaIdx = areaIdx.filter(x => x.k !== c.k); continue; }
         if (a && a.ways) return Object.assign(a, c);
       }
     }
@@ -416,14 +440,15 @@
     }
     if (fetching) return;
     if (!force && now - lastFetchFail < 8000) return;
-    fetching = true;
+    fetching = true; fetchStart = now;
     // Centro um pouco à frente do carro, para cobrir mais do caminho que vem
     const r = S.speedKmh > 70 ? AREA.rFast : AREA.rCity;
     const c = (S.heading != null && S.speedKmh > 15) ? destination(pos, S.heading, r * 0.35) : { lat: pos.lat, lon: pos.lon };
+    const onStatus = txt => { if (!area || area.k === 'q') { mapStatus = 'carregando mapa… ' + txt; render(); } };
     try {
       if (!area) { mapStatus = 'carregando mapa…'; render(); }
       if (force) await cacheDropCovering(pos);
-      const a = await fetchArea(c, r);
+      const a = await fetchArea(c, r, onStatus);
       setArea(a, 'net'); render();
     } catch (e) {
       lastFetchFail = Date.now();
@@ -904,6 +929,7 @@
   // Relógio de 1 s: sinal parado, contagem do silêncio, escurecer à noite
   let lastNightCheck = 0;
   setInterval(() => {
+    watchdog();
     if (S.lastFix && !S.stale && Date.now() - S.lastFix > 6000) { S.stale = true; render(); }
     if (T.overSince) renderTrip();
     if (S.muteUntil) { renderMute(); if (!muted()) { S.muteUntil = 0; if (S.state === 'danger') { stopAlarm(); startAlarm(); } render(); } }
