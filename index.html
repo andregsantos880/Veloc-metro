@@ -215,6 +215,18 @@
       o.start(); o.stop(ctx.currentTime + 0.05);
     } catch (e) {}
   }
+  // Saída com compressor para tocar no volume máximo sem distorcer
+  let master = null;
+  function out() {
+    if (!ctx) return null;
+    if (!master) {
+      const comp = ctx.createDynamicsCompressor();
+      comp.threshold.value = -12; comp.ratio.value = 12; comp.attack.value = 0.002; comp.release.value = 0.1;
+      master = ctx.createGain(); master.gain.value = 1.0;
+      master.connect(comp); comp.connect(ctx.destination);
+    }
+    return master;
+  }
   function beep(freq = 880, dur = 0.18, vol = 0.6) {
     if (!S.soundOn || !ctx) return;
     try {
@@ -222,15 +234,34 @@
       o.type = 'square'; o.frequency.value = freq;
       g.gain.setValueAtTime(vol, ctx.currentTime);
       g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + dur);
-      o.connect(g); g.connect(ctx.destination);
+      o.connect(g); g.connect(out());
       o.start(); o.stop(ctx.currentTime + dur);
+    } catch (e) {}
+  }
+  // Sirene: varredura de 700→1500 Hz com dois osciladores (grave + agudo), bem mais audível no carro
+  function siren(dur = 0.55) {
+    if (!S.soundOn || !ctx) return;
+    try {
+      const t = ctx.currentTime, g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(1.0, t + 0.03);
+      g.gain.setValueAtTime(1.0, t + dur - 0.05);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      g.connect(out());
+      for (const [type, f0, f1] of [['sawtooth', 700, 1500], ['square', 1400, 3000]]) {
+        const o = ctx.createOscillator(); o.type = type;
+        o.frequency.setValueAtTime(f0, t);
+        o.frequency.exponentialRampToValueAtTime(f1, t + dur * 0.5);
+        o.frequency.exponentialRampToValueAtTime(f0, t + dur);
+        o.connect(g); o.start(t); o.stop(t + dur);
+      }
     } catch (e) {}
   }
   function startAlarm() {
     if (beepTimer) return;
-    const fire = () => { beep(1000, 0.16); setTimeout(() => beep(760, 0.16), 220); try { navigator.vibrate && navigator.vibrate([150, 80, 150]); } catch (e) {} };
+    const fire = () => { siren(0.55); try { navigator.vibrate && navigator.vibrate([250, 100, 250]); } catch (e) {} };
     fire();
-    beepTimer = setInterval(fire, 1400);
+    beepTimer = setInterval(fire, 700);
   }
   function stopAlarm() { if (beepTimer) { clearInterval(beepTimer); beepTimer = null; } }
 
@@ -374,7 +405,7 @@
       document.body.classList.toggle('state-warn', state === 'warn');
       document.body.classList.toggle('state-danger', state === 'danger');
       if (state === 'danger') startAlarm(); else stopAlarm();
-      if (state === 'warn') beep(620, 0.12, 0.35);
+      if (state === 'warn') { beep(880, 0.15, 0.9); setTimeout(() => beep(880, 0.15, 0.9), 200); }
     }
   }
 
@@ -421,7 +452,7 @@
   el.btnPlus.addEventListener('click', () => { const l = effectiveLimit().limit ?? 50; S.manualLimit = Math.min(130, l + 10); render(); });
   el.btnAuto.addEventListener('click', () => { S.manualLimit = null; render(); });
   el.btnSound.addEventListener('click', () => { S.soundOn = !S.soundOn; el.btnSound.textContent = S.soundOn ? '🔔 Som: ligado' : '🔕 Som: desligado'; if (!S.soundOn) stopAlarm(); else if (S.state === 'danger') startAlarm(); });
-  el.btnTest.addEventListener('click', () => { unlockAudio(); beep(1000, 0.16); setTimeout(() => beep(760, 0.16), 220); try { navigator.vibrate && navigator.vibrate(200); } catch (e) {} });
+  el.btnTest.addEventListener('click', () => { unlockAudio(); siren(0.55); setTimeout(() => siren(0.55), 700); try { navigator.vibrate && navigator.vibrate([250, 100, 250]); } catch (e) {} });
 
   render();
 })();
