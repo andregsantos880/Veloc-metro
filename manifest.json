@@ -1,4 +1,5 @@
 {
+  "id": "/Veloc-metro/",
   "name": "Velocímetro Alerta",
   "short_name": "Velocímetro",
   "description": "Velocidade pelo GPS, limite da via e alertas de radar e lombada.",

@@ -46,8 +46,8 @@
   .app {
     height: 100%;
     display: grid;
-    grid-template-rows: auto auto 1fr auto auto;
-    grid-template-areas: "side" "banner" "center" "bar" "gps";
+    grid-template-rows: auto auto auto 1fr auto auto;
+    grid-template-areas: "side" "banner" "ahead" "center" "bar" "gps";
     gap: 8px;
     padding-top: max(12px, env(safe-area-inset-top, 0px));
     padding-bottom: max(12px, env(safe-area-inset-bottom, 0px));
@@ -56,6 +56,7 @@
   }
   .side { grid-area: side; }
   .banner { grid-area: banner; }
+  .ahead { grid-area: ahead; }
   .center { grid-area: center; }
   .bar { grid-area: bar; }
   .gps { grid-area: gps; }
@@ -72,7 +73,8 @@
     box-shadow: 0 2px 12px rgba(0,0,0,.4);
   }
   .sign.estimated { border-style: dashed; border-width: 6px; }
-  .sign.manual { border-color: #2b7de9; }
+  .sign.manual, .sign.fixed { border-color: #2b7de9; }
+  .sign.conditional { box-shadow: 0 0 0 4px rgba(245,197,24,.55), 0 2px 12px rgba(0,0,0,.4); }
   .sign.unknown { color: #999; font-size: 30px; }
   .road { min-width: 0; flex: 1; }
   .road-name {
@@ -81,15 +83,17 @@
   }
   .road-meta { color: var(--muted); font-size: 13px; margin-top: 4px; letter-spacing: .02em; line-height: 1.3; }
 
-  /* Aviso de radar / lombada */
-  .banner {
+  /* Aviso de radar / lombada e de mudança de limite */
+  .banner, .ahead {
     display: flex; align-items: center; gap: 10px;
     background: #1d2a3a; border: 1px solid rgba(255,255,255,.14);
     border-radius: 14px; padding: 10px 14px; font-weight: 600; font-size: 17px;
   }
-  .banner .dist { margin-left: auto; font-family: var(--font-num); font-size: 26px; font-variant-numeric: tabular-nums; }
+  .banner .dist, .ahead .dist { margin-left: auto; font-family: var(--font-num); font-size: 26px; font-variant-numeric: tabular-nums; }
   .banner.hot { background: #6a1a14; border-color: var(--danger); }
-  .banner[hidden] { display: none; }
+  .ahead { background: #26200a; border-color: rgba(245,197,24,.4); }
+  .ahead .mini { width: 34px; height: 34px; border-radius: 50%; background: #fff; border: 4px solid var(--sign-red); color: #111; display: grid; place-items: center; font-family: var(--font-num); font-size: 16px; font-weight: 700; flex: none; }
+  .banner[hidden], .ahead[hidden] { display: none; }
 
   /* Centro: velocidade */
   .center { display: grid; place-items: center; text-align: center; min-height: 0; }
@@ -118,6 +122,8 @@
   button.icon { flex: none; width: 52px; padding: 12px 0; font-size: 20px; line-height: 1; }
   button.toggle.on { border-color: var(--ok); color: var(--ok); }
   button.off { opacity: .45; }
+  button.muted { border-color: var(--warn); color: var(--warn); font-family: var(--font-num); font-size: 22px; }
+  #btnSound { -webkit-touch-callout: none; touch-action: manipulation; }
   .gps { display: flex; justify-content: space-between; color: var(--muted); font-size: 12px; letter-spacing: .03em; }
   .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); margin-right: 6px; vertical-align: middle; }
   .dot.on { background: var(--ok); }
@@ -127,14 +133,14 @@
   @media (orientation: landscape) and (max-height: 560px) {
     .app {
       grid-template-columns: 1.1fr 1fr;
-      grid-template-rows: auto 1fr auto auto;
-      grid-template-areas: "center side" "center banner" "bar bar" "gps gps";
+      grid-template-rows: auto auto 1fr auto auto;
+      grid-template-areas: "center side" "center banner" "center ahead" "bar bar" "gps gps";
       column-gap: 20px;
       padding-top: max(8px, env(safe-area-inset-top, 0px));
       padding-bottom: max(8px, env(safe-area-inset-bottom, 0px));
     }
-    .side { align-self: center; }
-    .banner { align-self: start; }
+    .side { align-self: end; }
+    .ahead { align-self: start; }
     .speed { font-size: clamp(90px, 46vh, 200px); }
     .unit { font-size: 16px; margin-top: 2px; }
     .status { margin-top: 6px; font-size: 14px; }
@@ -167,6 +173,16 @@
   body.dim.peek .side, body.dim.peek .bar, body.dim.peek .gps, body.dim.peek .unit, body.dim.peek .status { opacity: 1 !important; }
   body.dim.peek .speed { color: var(--fg) !important; }
 
+  /* HUD: espelhado para refletir no para-brisa */
+  body.hud { background: #000 !important; animation: none !important; }
+  body.hud .app { transform: scaleX(-1); }
+  body.hud .bar, body.hud .gps, body.hud .road-meta { display: none; }
+  body.hud .speed { color: #fff; }
+  body.hud.state-warn .speed { color: var(--warn); }
+  body.hud.state-danger .speed { color: var(--danger); }
+  body.hud .app { grid-template-rows: auto auto auto 1fr auto; }
+  .hudExit { position: fixed; left: 12px; bottom: max(12px, env(safe-area-inset-bottom, 0px)); z-index: 6; padding: 10px 14px; font-size: 14px; opacity: .7; }
+
   /* Painéis deslizantes (ajustes e viagem) */
   .sheet {
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 10;
@@ -185,7 +201,8 @@
   .seg button.on { background: var(--fg); color: #0b0f14; border-color: transparent; }
   .sheet .row { display: flex; gap: 8px; margin-top: 8px; }
   .sheet .hint { color: var(--muted); font-size: 13px; margin-top: 6px; line-height: 1.4; }
-  .sheet a.btn { display: block; text-align: center; text-decoration: none; }
+  .sheet a.btn { display: block; text-align: center; text-decoration: none; flex: 1; }
+  .sheet a.btn button { width: 100%; }
   .closer { margin-top: 18px; }
   .scrim { position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 9; }
   .scrim[hidden] { display: none; }
@@ -196,6 +213,20 @@
   .stat .v { font-family: var(--font-num); font-size: 32px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
   .stat .v small { font-size: 16px; color: var(--muted); margin-left: 4px; font-family: var(--font-ui); font-weight: 400; }
   .stat .k { color: var(--muted); font-size: 12px; margin-top: 6px; letter-spacing: .04em; }
+  .trips { display: grid; gap: 6px; }
+  .trip { display: flex; align-items: center; gap: 10px; background: rgba(255,255,255,.05); border-radius: 12px; padding: 10px 12px; font-size: 14px; }
+  .trip .when { color: var(--muted); font-size: 12px; }
+  .trip .sum { flex: 1; min-width: 0; }
+  .trip button { flex: none; padding: 8px 10px; font-size: 13px; border-radius: 10px; }
+
+  /* Mapa da viagem */
+  .mapView { position: fixed; inset: 0; z-index: 20; background: #000; display: grid; grid-template-rows: auto 1fr; }
+  .mapView[hidden] { display: none; }
+  .mapView .mapHead { display: flex; gap: 8px; align-items: center; padding: max(10px, env(safe-area-inset-top, 0px)) 12px 10px; background: var(--panel); }
+  .mapView .mapHead h2 { font-family: var(--font-num); font-size: 22px; margin: 0; flex: 1; }
+  .mapView .mapHead button { flex: none; padding: 9px 12px; font-size: 14px; }
+  #map { width: 100%; height: 100%; }
+  .leaflet-container { background: #0b0f14; }
 </style>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@700&family=Barlow:wght@400;600&display=swap">
@@ -205,7 +236,7 @@
 <div class="gate" id="gate">
   <div>
     <h1>Velocímetro Alerta</h1>
-    <p>Mostra sua velocidade pelo GPS e o limite da via em que você está. Acima do limite a tela fica vermelha e toca um alerta. Avisa radares e lombadas à frente.</p>
+    <p>Mostra sua velocidade pelo GPS e o limite da via em que você está. Acima do limite a tela fica vermelha e toca um alerta. Avisa radares, lombadas e quando o limite vai cair.</p>
     <button class="primary" id="btnStart">Iniciar e permitir localização</button>
     <div class="err" id="gateErr" hidden></div>
   </div>
@@ -225,6 +256,9 @@
   <div class="banner" id="banner" hidden>
     <span id="bannerIcon">📷</span><span id="bannerText">Radar</span><span class="dist" id="bannerDist"></span>
   </div>
+  <div class="ahead" id="ahead" hidden>
+    <span class="mini" id="aheadSign">40</span><span id="aheadText">Limite cai à frente</span><span class="dist" id="aheadDist"></span>
+  </div>
 
   <div class="center">
     <div>
@@ -238,7 +272,7 @@
     <button class="icon" id="btnMinus" aria-label="Diminuir limite">−</button>
     <button class="icon" id="btnPlus" aria-label="Aumentar limite">+</button>
     <button id="btnAuto" aria-label="Voltar ao limite automático" hidden>Auto</button>
-    <button class="icon" id="btnSound" aria-label="Som">🔔</button>
+    <button class="icon" id="btnSound" aria-label="Silenciar por 1 minuto (segure para desligar o som)">🔔</button>
     <button class="icon" id="btnVoice" aria-label="Avisos por voz">🗣️</button>
     <button class="icon" id="btnStats" aria-label="Viagem">📊</button>
     <button class="icon" id="btnSettings" aria-label="Ajustes">⚙️</button>
@@ -248,6 +282,7 @@
     <span id="tripMini"></span>
   </div>
 </div>
+<button class="hudExit" id="btnHudExit" hidden>Sair do HUD</button>
 
 <div class="scrim" id="scrim" hidden></div>
 
@@ -261,6 +296,8 @@
     <button data-sound="buzina">Buzina</button>
     <button id="btnTest">Testar</button>
   </div>
+  <div class="row"><button class="toggle" id="btnSoundOn">🔔 Som do alerta: ligado</button></div>
+  <div class="hint">Na tela principal, um toque no 🔔 silencia por 1 minuto; segurar liga/desliga o som.</div>
 
   <h3>Tolerância antes do alerta</h3>
   <div class="seg" role="group" aria-label="Tolerância">
@@ -278,23 +315,41 @@
     <button data-warn="10">10 km/h antes</button>
   </div>
 
-  <h3>Opções</h3>
-  <div class="row"><button class="toggle" id="btnDim">🌙 Escurecer quando OK</button></div>
+  <h3>Tela</h3>
+  <div class="seg" role="group" aria-label="Escurecer quando OK">
+    <button data-dim="off">Normal</button>
+    <button data-dim="on">Escurecer quando OK</button>
+    <button data-dim="night">Escurecer à noite</button>
+  </div>
+  <div class="hint" id="nightInfo">"À noite" usa o pôr e o nascer do sol da sua posição.</div>
+  <div class="row"><button id="btnHud">🪞 Modo HUD (espelhado no para-brisa)</button></div>
+
+  <h3>Avisos</h3>
   <div class="row"><button class="toggle" id="btnRadar">📷 Avisar radares e lombadas</button></div>
+  <div class="row"><button class="toggle" id="btnAhead">⬇️ Avisar quando o limite vai cair</button></div>
   <div class="row"><button class="toggle" id="btnVoice2">🗣️ Avisos por voz</button></div>
 
-  <h3>App e mapa</h3>
+  <h3>Mapa offline</h3>
+  <div class="row"><button id="btnDlHere">⬇️ Baixar 4 km ao redor daqui</button></div>
+  <div class="row"><button id="btnSaveHome">📍 Salvar aqui como Casa</button><button id="btnSaveWork">📍 Salvar aqui como Trabalho</button></div>
+  <div class="row"><button id="btnDlHome" hidden>⬇️ Baixar Casa</button><button id="btnDlWork" hidden>⬇️ Baixar Trabalho</button></div>
+  <div class="hint" id="dlStatus"></div>
+  <div class="row"><button id="btnRefreshMap">🔄 Recarregar mapa desta área</button></div>
+  <div class="hint" id="mapInfo"></div>
+
+  <h3>App e correções</h3>
   <div class="row"><button id="btnInstall" hidden>📲 Instalar como app</button></div>
   <div class="hint" id="installHint" hidden></div>
-  <div class="row"><button id="btnRefreshMap">🔄 Recarregar mapa desta área</button></div>
   <div class="row"><a class="btn" id="lnkOsm" href="https://www.openstreetmap.org/" target="_blank" rel="noopener"><button type="button">🗺️ Corrigir esta via no OpenStreetMap</button></a></div>
-  <div class="hint" id="mapInfo"></div>
+  <div class="row"><button id="btnClearFixes">🧹 Apagar minhas correções de limite</button></div>
+  <div class="hint" id="fixInfo"></div>
+  <div class="hint">Radares: Pardal (DNIT, ANTT, DER-SP, CET-SP, Inmetro) + OpenStreetMap contributors, ODbL. A sinalização da via sempre prevalece.</div>
 
   <div class="row closer"><button class="primary" id="btnCloseSettings">Fechar</button></div>
 </div>
 
 <div class="sheet" id="sheetStats" role="dialog" aria-label="Viagem">
-  <h2>Viagem</h2>
+  <h2>Viagem atual</h2>
   <div class="stats">
     <div class="stat"><div class="v" id="stDist">0<small>km</small></div><div class="k">DISTÂNCIA</div></div>
     <div class="stat"><div class="v" id="stTime">0<small>min</small></div><div class="k">TEMPO EM MOVIMENTO</div></div>
@@ -304,654 +359,20 @@
     <div class="stat"><div class="v" id="stOverTime">0<small>min</small></div><div class="k">TEMPO ACIMA DO LIMITE</div></div>
   </div>
   <div class="hint" id="stSince"></div>
-  <div class="row closer"><button id="btnResetTrip">Zerar viagem</button><button class="primary" id="btnCloseStats">Fechar</button></div>
+  <div class="row"><button id="btnMapCur">🗺️ Mapa</button><button id="btnGpxCur">GPX</button><button id="btnCsvCur">CSV</button><button id="btnResetTrip">Encerrar e zerar</button></div>
+
+  <h3>Viagens anteriores</h3>
+  <div class="trips" id="trips"></div>
+  <div class="hint" id="tripsHint"></div>
+
+  <div class="row closer"><button class="primary" id="btnCloseStats">Fechar</button></div>
 </div>
 
-<script>
-(() => {
-  const $ = id => document.getElementById(id);
-  const el = {
-    gate: $('gate'), gateErr: $('gateErr'), btnStart: $('btnStart'),
-    sign: $('sign'), roadName: $('roadName'), roadMeta: $('roadMeta'),
-    banner: $('banner'), bannerIcon: $('bannerIcon'), bannerText: $('bannerText'), bannerDist: $('bannerDist'),
-    speed: $('speed'), status: $('status'),
-    btnMinus: $('btnMinus'), btnPlus: $('btnPlus'), btnAuto: $('btnAuto'),
-    btnSound: $('btnSound'), btnVoice: $('btnVoice'), btnVoice2: $('btnVoice2'), btnStats: $('btnStats'), btnSettings: $('btnSettings'),
-    btnTest: $('btnTest'), btnDim: $('btnDim'), btnRadar: $('btnRadar'),
-    btnInstall: $('btnInstall'), installHint: $('installHint'), btnRefreshMap: $('btnRefreshMap'), lnkOsm: $('lnkOsm'), mapInfo: $('mapInfo'),
-    sndBtns: Array.from(document.querySelectorAll('[data-sound]')),
-    tolBtns: Array.from(document.querySelectorAll('[data-tol]')),
-    warnBtns: Array.from(document.querySelectorAll('[data-warn]')),
-    gpsDot: $('gpsDot'), gpsText: $('gpsText'), accText: $('accText'), tripMini: $('tripMini'),
-    scrim: $('scrim'), sheetSettings: $('sheetSettings'), sheetStats: $('sheetStats'),
-    btnCloseSettings: $('btnCloseSettings'), btnCloseStats: $('btnCloseStats'), btnResetTrip: $('btnResetTrip'),
-    stDist: $('stDist'), stTime: $('stTime'), stAvg: $('stAvg'), stMax: $('stMax'), stOver: $('stOver'), stOverTime: $('stOverTime'), stSince: $('stSince'),
-  };
+<div class="mapView" id="mapView" hidden>
+  <div class="mapHead"><h2 id="mapTitle">Mapa da viagem</h2><button id="btnMapClose">Fechar</button></div>
+  <div id="map"></div>
+</div>
 
-  // ---------- Estado ----------
-  const S = {
-    speedKmh: 0,
-    lastPos: null,          // {lat, lon, t, acc}
-    lastFix: 0,
-    heading: null,          // graus 0–360, direção do movimento
-    stale: false,
-    autoLimit: null, autoSource: 'none', autoRoad: '', autoWayId: null,
-    manualLimit: null,
-    soundOn: true, soundType: 'sirene', voiceOn: true, dim: false, radarOn: true,
-    tolMode: 'none',        // 'none' | 'br' | 'k5' | 'p10'
-    warnMargin: 5,
-    state: 'ok',
-    wakeLock: null,
-    lastAnnouncedLimit: null,
-  };
-
-  // Limites padrão (CTB) quando a via não tem maxspeed no OSM — marcados como estimados
-  const DEFAULTS = {
-    motorway: 110, motorway_link: 60,
-    trunk: 80, trunk_link: 60,
-    primary: 60, primary_link: 40,
-    secondary: 50, secondary_link: 40,
-    tertiary: 40, tertiary_link: 40,
-    unclassified: 40, residential: 30, living_street: 30, service: 20,
-  };
-  const HW_NAMES = { motorway: 'Rodovia', trunk: 'Rodovia', primary: 'Via principal', secondary: 'Via secundária', tertiary: 'Via coletora', residential: 'Rua residencial', living_street: 'Rua residencial', service: 'Via de serviço', unclassified: 'Via sem nome' };
-
-  function toleranceFor(limit) {
-    if (limit == null) return 0;
-    switch (S.tolMode) {
-      case 'br': return limit <= 100 ? 7 : Math.round(limit * 0.07);
-      case 'k5': return 5;
-      case 'p10': return Math.round(limit * 0.10);
-      default: return 0;
-    }
-  }
-
-  // ---------- Áudio ----------
-  let ctx = null, beepTimer = null;
-  function unlockAudio() {
-    try {
-      ctx = ctx || new (window.AudioContext || window.webkitAudioContext)();
-      if (ctx.state === 'suspended') ctx.resume();
-      const o = ctx.createOscillator(), g = ctx.createGain();
-      g.gain.value = 0.0001; o.connect(g); g.connect(ctx.destination);
-      o.start(); o.stop(ctx.currentTime + 0.05);
-    } catch (e) {}
-  }
-  let master = null;
-  function out() {
-    if (!ctx) return null;
-    if (!master) {
-      const comp = ctx.createDynamicsCompressor();
-      comp.threshold.value = -12; comp.ratio.value = 12; comp.attack.value = 0.002; comp.release.value = 0.1;
-      master = ctx.createGain(); master.gain.value = 1.0;
-      master.connect(comp); comp.connect(ctx.destination);
-    }
-    return master;
-  }
-  function beep(freq = 880, dur = 0.18, vol = 0.6) {
-    if (!S.soundOn || !ctx) return;
-    try {
-      const o = ctx.createOscillator(), g = ctx.createGain();
-      o.type = 'square'; o.frequency.value = freq;
-      g.gain.setValueAtTime(vol, ctx.currentTime);
-      g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + dur);
-      o.connect(g); g.connect(out());
-      o.start(); o.stop(ctx.currentTime + dur);
-    } catch (e) {}
-  }
-  function siren(dur = 0.55) {
-    if (!S.soundOn || !ctx) return;
-    try {
-      const t = ctx.currentTime, g = ctx.createGain();
-      g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(1.0, t + 0.03);
-      g.gain.setValueAtTime(1.0, t + dur - 0.05);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-      g.connect(out());
-      for (const [type, f0, f1] of [['sawtooth', 700, 1500], ['square', 1400, 3000]]) {
-        const o = ctx.createOscillator(); o.type = type;
-        o.frequency.setValueAtTime(f0, t);
-        o.frequency.exponentialRampToValueAtTime(f1, t + dur * 0.5);
-        o.frequency.exponentialRampToValueAtTime(f0, t + dur);
-        o.connect(g); o.start(t); o.stop(t + dur);
-      }
-    } catch (e) {}
-  }
-  function horn(dur = 0.6) {
-    if (!S.soundOn || !ctx) return;
-    try {
-      const t = ctx.currentTime, g = ctx.createGain();
-      g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(1.0, t + 0.02);
-      g.gain.setValueAtTime(1.0, t + dur - 0.08);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-      g.connect(out());
-      for (const [type, f] of [['sawtooth', 220], ['sawtooth', 277], ['square', 440]]) {
-        const o = ctx.createOscillator(); o.type = type; o.frequency.value = f;
-        o.connect(g); o.start(t); o.stop(t + dur);
-      }
-    } catch (e) {}
-  }
-  function beeps() {
-    beep(1400, 0.12, 1.0); setTimeout(() => beep(1400, 0.12, 1.0), 160); setTimeout(() => beep(1400, 0.12, 1.0), 320);
-  }
-  const SOUNDS = {
-    sirene: { play: () => siren(0.55), every: 700 },
-    bipe:   { play: beeps,              every: 900 },
-    buzina: { play: () => horn(0.6),    every: 1000 },
-  };
-  function playAlert() { (SOUNDS[S.soundType] || SOUNDS.sirene).play(); try { navigator.vibrate && navigator.vibrate([250, 100, 250]); } catch (e) {} }
-  function startAlarm() {
-    if (beepTimer) return;
-    playAlert();
-    beepTimer = setInterval(playAlert, (SOUNDS[S.soundType] || SOUNDS.sirene).every);
-  }
-  function stopAlarm() { if (beepTimer) { clearInterval(beepTimer); beepTimer = null; } }
-  // Toque curto e discreto para avisos (radar, lombada)
-  function chime() { beep(1046, 0.12, 0.9); setTimeout(() => beep(1318, 0.16, 0.9), 140); try { navigator.vibrate && navigator.vibrate(120); } catch (e) {} }
-
-  // ---------- Voz ----------
-  let voiceReady = false;
-  function say(text, { force = false } = {}) {
-    if (!S.voiceOn && !force) return;
-    try {
-      if (!('speechSynthesis' in window)) return;
-      const u = new SpeechSynthesisUtterance(text);
-      u.lang = 'pt-BR'; u.rate = 1.05; u.volume = 1;
-      const v = speechSynthesis.getVoices().find(v => /pt[-_]BR/i.test(v.lang));
-      if (v) u.voice = v;
-      speechSynthesis.cancel();
-      speechSynthesis.speak(u);
-      voiceReady = true;
-    } catch (e) {}
-  }
-  function primeVoice() { try { if ('speechSynthesis' in window) { speechSynthesis.getVoices(); const u = new SpeechSynthesisUtterance(' '); u.volume = 0; speechSynthesis.speak(u); } } catch (e) {} }
-
-  // ---------- Wake lock ----------
-  async function keepAwake() {
-    try {
-      if ('wakeLock' in navigator) {
-        S.wakeLock = await navigator.wakeLock.request('screen');
-        document.addEventListener('visibilitychange', async () => {
-          if (document.visibilityState === 'visible') { try { S.wakeLock = await navigator.wakeLock.request('screen'); } catch (e) {} }
-        });
-      }
-    } catch (e) {}
-  }
-
-  // ---------- Geometria ----------
-  const R = 6371000;
-  const toRad = d => d * Math.PI / 180;
-  function haversine(a, b) {
-    const dLat = toRad(b.lat - a.lat), dLon = toRad(b.lon - a.lon);
-    const s = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLon / 2) ** 2;
-    return 2 * R * Math.asin(Math.sqrt(s));
-  }
-  function bearing(a, b) {
-    const p1 = toRad(a.lat), p2 = toRad(b.lat), dl = toRad(b.lon - a.lon);
-    const y = Math.sin(dl) * Math.cos(p2);
-    const x = Math.cos(p1) * Math.sin(p2) - Math.sin(p1) * Math.cos(p2) * Math.cos(dl);
-    return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
-  }
-  const angleDiff = (a, b) => { let d = Math.abs(a - b) % 360; return d > 180 ? 360 - d : d; };
-  function destination(p, brg, dist) {
-    const d = dist / R, b = toRad(brg), p1 = toRad(p.lat), l1 = toRad(p.lon);
-    const p2 = Math.asin(Math.sin(p1) * Math.cos(d) + Math.cos(p1) * Math.sin(d) * Math.cos(b));
-    const l2 = l1 + Math.atan2(Math.sin(b) * Math.sin(d) * Math.cos(p1), Math.cos(d) - Math.sin(p1) * Math.sin(p2));
-    return { lat: p2 * 180 / Math.PI, lon: l2 * 180 / Math.PI };
-  }
-  // distância ponto→segmento em metros (projeção equiretangular local)
-  function distToSegment(p, a, b) {
-    const kx = Math.cos(toRad(p.lat)) * 111320, ky = 110540;
-    const px = (p.lon - a.lon) * kx, py = (p.lat - a.lat) * ky;
-    const bx = (b.lon - a.lon) * kx, by = (b.lat - a.lat) * ky;
-    const l2 = bx * bx + by * by;
-    let t = l2 ? (px * bx + py * by) / l2 : 0; t = Math.max(0, Math.min(1, t));
-    const dx = px - t * bx, dy = py - t * by;
-    return Math.sqrt(dx * dx + dy * dy);
-  }
-
-  // ---------- Overpass: carrega uma ÁREA inteira (vias + radares + lombadas) e guarda no celular ----------
-  const ENDPOINTS = [
-    'https://overpass-api.de/api/interpreter',
-    'https://lz4.overpass-api.de/api/interpreter',
-    'https://z.overpass-api.de/api/interpreter',
-    'https://overpass.osm.ch/api/interpreter',
-    'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
-    'https://overpass.private.coffee/api/interpreter',
-  ];
-  const AREA = { rCity: 1200, rFast: 2500, margin: 450, maxAge: 7 * 86400e3, maxCached: 8 };
-  const HW_RE = '^(motorway|trunk|primary|secondary|tertiary|unclassified|residential|living_street|service|motorway_link|trunk_link|primary_link|secondary_link|tertiary_link)$';
-  let epIndex = 0, fetching = false, lastErr = '', lastFetchFail = 0;
-  let area = null;        // {lat, lon, r, t, ways:[{i,h,n,m,f,b,o,g:[[lat,lon],...]}], nodes:[{i,k,lat,lon,m,n}]}
-  let prevArea = null;    // área anterior, ainda usada até a nova cobrir a posição
-  let mapStatus = '';
-
-  function parseMaxspeed(v) {
-    if (!v) return null;
-    const m = String(v).match(/(\d+(?:\.\d+)?)\s*(mph)?/i);
-    if (!m) return null;
-    let n = parseFloat(m[1]); if (m[2]) n = n * 1.609;
-    return Math.round(n);
-  }
-  function compact(elements) {
-    const ways = [], nodes = [];
-    for (const e of elements) {
-      const t = e.tags || {};
-      if (e.type === 'way' && e.geometry && e.geometry.length > 1) {
-        const ow = t.oneway === 'yes' || t.oneway === '1' || t.highway === 'motorway' || t.junction === 'roundabout' ? 1 : t.oneway === '-1' ? -1 : 0;
-        ways.push({
-          i: e.id, h: t.highway, n: t.name || t.ref || '',
-          m: parseMaxspeed(t.maxspeed), f: parseMaxspeed(t['maxspeed:forward']), b: parseMaxspeed(t['maxspeed:backward']),
-          o: ow, g: e.geometry.map(p => [+p.lat.toFixed(5), +p.lon.toFixed(5)]),
-        });
-      } else if (e.type === 'node' && e.lat != null) {
-        const k = t.highway === 'speed_camera' ? 'cam' : t.traffic_calming ? 'calm' : null;
-        if (k) nodes.push({ i: e.id, k, lat: +e.lat.toFixed(5), lon: +e.lon.toFixed(5), m: parseMaxspeed(t.maxspeed), n: t.name || '' });
-      }
-    }
-    return { ways, nodes };
-  }
-
-  async function overpass(q) {
-    const errs = [];
-    for (let i = 0; i < ENDPOINTS.length; i++) {
-      const url = ENDPOINTS[(epIndex + i) % ENDPOINTS.length];
-      const host = url.replace(/^https?:\/\//, '').split('/')[0];
-      try {
-        const ctrl = new AbortController(); const to = setTimeout(() => ctrl.abort(), 25000);
-        const r = await fetch(url, { method: 'POST', body: 'data=' + encodeURIComponent(q), headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, signal: ctrl.signal, cache: 'no-store' });
-        clearTimeout(to);
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        const j = await r.json();
-        epIndex = (epIndex + i) % ENDPOINTS.length;
-        lastErr = '';
-        return j.elements || [];
-      } catch (e) {
-        errs.push(host.split('.')[0] + ': ' + (e.name === 'AbortError' ? 'tempo esgotado' : (e.message || 'falha de rede')));
-      }
-    }
-    lastErr = errs.join(' · ');
-    throw new Error('overpass');
-  }
-
-  // Cache no celular (localStorage): uma entrada por área carregada
-  const CK = 'vA:';
-  function cacheList() {
-    const out = [];
-    try {
-      for (let i = 0; i < localStorage.length; i++) {
-        const k = localStorage.key(i); if (!k || !k.startsWith(CK)) continue;
-        const m = k.slice(CK.length).split(',');
-        out.push({ k, lat: +m[0], lon: +m[1], r: +m[2], t: +m[3] });
-      }
-    } catch (e) {}
-    return out.sort((a, b) => b.t - a.t);
-  }
-  function cacheFind(pos, { force = false } = {}) {
-    const now = Date.now();
-    for (const c of cacheList()) {
-      if (!force && now - c.t > AREA.maxAge) continue;
-      if (haversine(pos, c) < c.r - AREA.margin) {
-        try { const a = JSON.parse(localStorage.getItem(c.k)); if (a && a.ways) return Object.assign(a, { lat: c.lat, lon: c.lon, r: c.r, t: c.t }); } catch (e) {}
-      }
-    }
-    return null;
-  }
-  function cachePut(a) {
-    const key = CK + [a.lat.toFixed(4), a.lon.toFixed(4), a.r, a.t].join(',');
-    const val = JSON.stringify({ ways: a.ways, nodes: a.nodes });
-    for (let attempt = 0; attempt < 4; attempt++) {
-      try {
-        const list = cacheList();
-        while (list.length >= AREA.maxCached) { const old = list.pop(); localStorage.removeItem(old.k); }
-        localStorage.setItem(key, val); return;
-      } catch (e) {
-        const list = cacheList(); if (!list.length) return;
-        localStorage.removeItem(list.pop().k); // sem espaço: tira a mais antiga e tenta de novo
-      }
-    }
-  }
-  function cacheDropCovering(pos) { for (const c of cacheList()) if (haversine(pos, c) < c.r) localStorage.removeItem(c.k); }
-
-  function setArea(a, from) {
-    if (area && area !== a) prevArea = area;
-    area = a;
-    mapStatus = from === 'cache' ? 'mapa em cache' : from === 'cache-old' ? 'mapa em cache (antigo)' : 'mapa atualizado';
-  }
-
-  async function ensureArea(pos, { force = false } = {}) {
-    const now = Date.now();
-    const covered = area && haversine(pos, area) < area.r - AREA.margin;
-    if (covered && !force) return;
-    if (!force) { const c = cacheFind(pos); if (c) { setArea(c, 'cache'); render(); return; } }
-    if (fetching) return;
-    if (!force && now - lastFetchFail < 8000) return;
-    fetching = true;
-    // Centro um pouco à frente do carro, para cobrir mais do caminho que vem
-    const r = S.speedKmh > 70 ? AREA.rFast : AREA.rCity;
-    const c = (S.heading != null && S.speedKmh > 15) ? destination(pos, S.heading, r * 0.35) : { lat: pos.lat, lon: pos.lon };
-    const q = `[out:json][timeout:20];(way(around:${r},${c.lat.toFixed(5)},${c.lon.toFixed(5)})["highway"~"${HW_RE}"];node(around:${r},${c.lat.toFixed(5)},${c.lon.toFixed(5)})["highway"="speed_camera"];node(around:${r},${c.lat.toFixed(5)},${c.lon.toFixed(5)})["traffic_calming"~"^(bump|hump|table|cushion|yes|rumble_strip|choker)$"];);out tags geom;`;
-    try {
-      if (!area) { mapStatus = 'carregando mapa…'; render(); }
-      const els = await overpass(q);
-      const a = Object.assign({ lat: c.lat, lon: c.lon, r, t: Date.now() }, compact(els));
-      cachePut(a);
-      if (force) cacheDropCovering(pos);
-      setArea(a, 'net'); render();
-    } catch (e) {
-      lastFetchFail = Date.now();
-      if (!area) {
-        const old = cacheFind(pos, { force: true });
-        if (old) { setArea(old, 'cache-old'); }
-        else mapStatus = 'serviço de mapas indisponível — ' + (lastErr || 'tentando de novo');
-      } else mapStatus = 'sem internet — usando mapa em cache';
-      render();
-    } finally { fetching = false; }
-  }
-
-  // ---------- Qual via estou? (distância + rumo) ----------
-  function matchWay(pos) {
-    const lists = [area, prevArea].filter(Boolean);
-    let best = null, bestScore = Infinity, bestDiff = null, bestD = Infinity;
-    const H = S.heading;
-    for (const a of lists) for (const w of a.ways) {
-      const g = w.g;
-      for (let i = 1; i < g.length; i++) {
-        const A = { lat: g[i - 1][0], lon: g[i - 1][1] }, B = { lat: g[i][0], lon: g[i][1] };
-        const d = distToSegment(pos, A, B);
-        if (d > 70) continue;
-        let score = d, diff = null;
-        if (H != null) {
-          diff = angleDiff(H, bearing(A, B));               // 0..180 em relação ao sentido do desenho da via
-          const und = Math.min(diff, 180 - diff);          // 0..90 ignorando sentido
-          score += und * 0.6;                              // paralela errada custa até 54 m
-          if (w.o === 1 && diff > 120) score += 80;        // mão única no contrafluxo: quase certo que não é essa
-          if (w.o === -1 && diff < 60) score += 80;
-        }
-        if (w.i === S.autoWayId) score -= 10;              // histerese: não trocar de via por pouco
-        if (score < bestScore) { bestScore = score; best = w; bestDiff = diff; bestD = d; }
-      }
-    }
-    return best ? { w: best, diff: bestDiff, d: bestD } : null;
-  }
-
-  function updateLimit(pos) {
-    const m = matchWay(pos);
-    if (!m) {
-      if (area) { S.autoRoad = 'Nenhuma via próxima'; S.autoLimit = null; S.autoSource = 'none'; S.autoWayId = null; }
-      return;
-    }
-    const w = m.w;
-    S.autoWayId = w.i;
-    S.autoRoad = w.n || HW_NAMES[w.h] || 'Via sem nome';
-    let ms = w.m;
-    if (m.diff != null) ms = (m.diff < 90 ? (w.f ?? w.m) : (w.b ?? w.m));
-    if (!ms) ms = w.m || w.f || w.b;
-    if (ms) { S.autoLimit = ms; S.autoSource = 'osm'; }
-    else if (DEFAULTS[w.h]) { S.autoLimit = DEFAULTS[w.h]; S.autoSource = 'estimated'; }
-    else { S.autoLimit = null; S.autoSource = 'none'; }
-  }
-
-  // ---------- Radares e lombadas à frente ----------
-  const announced = new Map(); // id → quando avisou
-  let hazard = null;
-  function checkHazards(pos) {
-    hazard = null;
-    if (!S.radarOn || !area || S.heading == null || S.speedKmh < 8) return;
-    const lists = [area, prevArea].filter(Boolean);
-    let best = null;
-    for (const a of lists) for (const n of a.nodes) {
-      const d = haversine(pos, n); if (d > 500 || d < 8) continue;
-      const diff = angleDiff(S.heading, bearing(pos, n)); if (diff > 45) continue;      // tem que estar à frente
-      if (d * Math.sin(toRad(diff)) > 35) continue;                                    // e no meu caminho, não numa rua ao lado
-      if (!best || d < best.d) best = { n, d };
-    }
-    if (!best) return;
-    hazard = best;
-    const now = Date.now();
-    for (const [k, t] of announced) if (now - t > 90000) announced.delete(k);
-    if (best.d <= 320 && !announced.has(best.n.i)) {
-      announced.set(best.n.i, now);
-      chime();
-      if (best.n.k === 'cam') say(`Radar a ${Math.round(best.d / 10) * 10} metros` + (best.n.m ? `, limite ${best.n.m}` : ''));
-      else say('Lombada à frente');
-    }
-  }
-
-  // ---------- Viagem (estatísticas) ----------
-  const T = { dist: 0, movingMs: 0, max: 0, overCount: 0, overMs: 0, start: Date.now(), overSince: null };
-  function loadTrip() { try { Object.assign(T, JSON.parse(localStorage.getItem('velocimetro-trip') || '{}')); T.overSince = null; } catch (e) {} }
-  function saveTrip() { try { localStorage.setItem('velocimetro-trip', JSON.stringify({ dist: T.dist, movingMs: T.movingMs, max: T.max, overCount: T.overCount, overMs: T.overMs, start: T.start })); } catch (e) {} }
-  function resetTrip() { T.dist = 0; T.movingMs = 0; T.max = 0; T.overCount = 0; T.overMs = 0; T.start = Date.now(); T.overSince = S.state === 'danger' ? Date.now() : null; saveTrip(); renderTrip(); }
-  function tripUpdate(prev, pos, kmh) {
-    if (!prev || prev.acc > 40 || pos.acc > 40) return;
-    const dt = pos.t - prev.t; if (dt <= 0 || dt > 10000) return;
-    if (kmh > 3) { T.dist += haversine(prev, pos); T.movingMs += dt; }
-    if (kmh > T.max && pos.acc <= 25) T.max = kmh;
-  }
-  const fmtMin = ms => { const m = Math.round(ms / 60000); return m < 60 ? `${m}<small>min</small>` : `${Math.floor(m / 60)}<small>h</small>${String(m % 60).padStart(2, '0')}<small>min</small>`; };
-  function renderTrip() {
-    const overMs = T.overMs + (T.overSince ? Date.now() - T.overSince : 0);
-    const avg = T.movingMs > 0 ? T.dist / (T.movingMs / 1000) * 3.6 : 0;
-    el.stDist.innerHTML = `${(T.dist / 1000).toFixed(1).replace('.', ',')}<small>km</small>`;
-    el.stTime.innerHTML = fmtMin(T.movingMs);
-    el.stAvg.innerHTML = `${Math.round(avg)}<small>km/h</small>`;
-    el.stMax.innerHTML = `${Math.round(T.max)}<small>km/h</small>`;
-    el.stOver.innerHTML = `${T.overCount}<small>×</small>`;
-    el.stOverTime.innerHTML = fmtMin(overMs);
-    el.stSince.textContent = 'Desde ' + new Date(T.start).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
-    el.tripMini.textContent = `máx ${Math.round(T.max)} · ${(T.dist / 1000).toFixed(1).replace('.', ',')} km`;
-  }
-  setInterval(saveTrip, 15000);
-
-  // ---------- Render ----------
-  function effectiveLimit() {
-    if (S.manualLimit != null) return { limit: S.manualLimit, source: 'manual' };
-    return { limit: S.autoLimit, source: S.autoSource };
-  }
-  function render() {
-    const { limit, source } = effectiveLimit();
-    el.speed.textContent = Math.round(S.speedKmh);
-    el.roadName.textContent = S.autoRoad || (area ? 'Procurando via…' : 'Carregando mapa…');
-
-    el.sign.classList.toggle('estimated', source === 'estimated');
-    el.sign.classList.toggle('manual', source === 'manual');
-    el.sign.classList.toggle('unknown', limit == null);
-    el.sign.textContent = limit == null ? '—' : limit;
-    el.btnAuto.hidden = source !== 'manual';
-
-    const srcTxt = source === 'manual' ? 'limite definido por você'
-      : source === 'osm' ? 'limite oficial (OpenStreetMap)'
-      : source === 'estimated' ? 'sem placa no mapa — estimado pelo tipo da via'
-      : area ? 'sem dado de limite para esta via' : '';
-    el.roadMeta.textContent = [srcTxt, mapStatus].filter(Boolean).join(' · ');
-
-    // Aviso de voz quando o limite da via muda
-    if (source !== 'manual' && limit != null && limit !== S.lastAnnouncedLimit && S.lastPos && !S.stale) {
-      if (S.lastAnnouncedLimit != null) say(`Limite ${limit}`);
-      S.lastAnnouncedLimit = limit;
-    }
-
-    let state = 'ok', msg = '';
-    const tol = toleranceFor(limit);
-    if (S.stale) { msg = 'GPS sem atualização — procurando sinal…'; }
-    else if (limit != null) {
-      const alertAt = limit + tol, warnAt = alertAt - S.warnMargin;
-      if (S.speedKmh > alertAt) { state = 'danger'; msg = `ACIMA DO LIMITE: +${Math.round(S.speedKmh - limit)} km/h`; }
-      else if (S.speedKmh >= warnAt) { state = 'warn'; msg = tol ? `Atenção: perto do limite (alerta a ${alertAt})` : 'Atenção: perto do limite'; }
-      else msg = tol ? `Dentro do limite (${limit}, alerta a ${alertAt} km/h)` : `Dentro do limite (${limit} km/h)`;
-    } else {
-      msg = S.lastPos ? 'Sem limite conhecido para esta via' : 'Aguardando sinal do GPS…';
-    }
-    el.status.textContent = msg;
-    if (state !== S.state) {
-      S.state = state;
-      document.body.classList.toggle('state-warn', state === 'warn');
-      document.body.classList.toggle('state-danger', state === 'danger');
-      if (state === 'danger') { startAlarm(); T.overCount++; T.overSince = Date.now(); say('Acima do limite'); }
-      else { stopAlarm(); if (T.overSince) { T.overMs += Date.now() - T.overSince; T.overSince = null; } }
-      if (state === 'warn') { beep(880, 0.15, 0.9); setTimeout(() => beep(880, 0.15, 0.9), 200); }
-    }
-
-    // Radar / lombada
-    if (hazard) {
-      const n = hazard.n;
-      el.banner.hidden = false;
-      el.bannerIcon.textContent = n.k === 'cam' ? '📷' : '⚠️';
-      el.bannerText.textContent = n.k === 'cam' ? ('Radar' + (n.m ? ` · ${n.m} km/h` : '')) : 'Lombada';
-      el.bannerDist.textContent = `${Math.round(hazard.d / 10) * 10} m`;
-      el.banner.classList.toggle('hot', n.k === 'cam' && n.m != null && S.speedKmh > n.m + toleranceFor(n.m));
-    } else el.banner.hidden = true;
-
-    document.body.classList.toggle('stale', S.stale);
-  }
-
-  // ---------- GPS ----------
-  function onPosition(p) {
-    const c = p.coords;
-    const pos = { lat: c.latitude, lon: c.longitude, t: p.timestamp || Date.now(), acc: c.accuracy || 999 };
-    const prev = S.lastPos;
-    S.lastFix = Date.now(); S.stale = false;
-
-    // Velocidade: usa a do chip de GPS; se não vier, calcula pela distância. Leituras ruins não mexem na velocidade.
-    let kmh = null;
-    if (c.speed != null && !isNaN(c.speed) && c.speed >= 0) kmh = c.speed * 3.6;
-    else if (prev) { const dt = (pos.t - prev.t) / 1000; if (dt > 0.5) kmh = haversine(prev, pos) / dt * 3.6; }
-    if (kmh != null && pos.acc <= 35) {
-      if (kmh < 3) kmh = 0;
-      S.speedKmh = (S.speedKmh === 0 && kmh > 0) ? kmh : S.speedKmh * 0.45 + kmh * 0.55;   // média móvel suave
-      if (S.speedKmh < 1) S.speedKmh = 0;
-      tripUpdate(prev, pos, kmh);
-    }
-
-    // Rumo: do chip quando andando; senão, pela última posição
-    if (c.heading != null && !isNaN(c.heading) && kmh != null && kmh > 7) S.heading = c.heading;
-    else if (prev && pos.acc <= 35 && haversine(prev, pos) > 10 && S.speedKmh > 5) S.heading = bearing(prev, pos);
-
-    S.lastPos = pos;
-    el.gpsDot.className = 'dot ' + (pos.acc <= 25 ? 'on' : pos.acc <= 60 ? '' : 'bad');
-    el.gpsText.textContent = pos.acc <= 25 ? 'GPS bom' : pos.acc <= 60 ? 'GPS regular' : 'GPS fraco';
-    el.accText.textContent = `±${Math.round(pos.acc)} m`;
-
-    ensureArea(pos);
-    updateLimit(pos);
-    checkHazards(pos);
-    render();
-    el.lnkOsm.href = `https://www.openstreetmap.org/edit#map=19/${pos.lat.toFixed(5)}/${pos.lon.toFixed(5)}`;
-  }
-  function onError(e) {
-    el.gpsDot.className = 'dot bad';
-    el.gpsText.textContent = e.code === 1 ? 'Localização negada' : 'Sem sinal de GPS';
-    if (e.code === 1) { el.gateErr.hidden = false; el.gateErr.textContent = 'Permissão de localização negada. Libere nas configurações do navegador e recarregue.'; el.gate.hidden = false; }
-  }
-  // Sem leitura nova há alguns segundos: não dá para saber a velocidade, então não alarma
-  setInterval(() => {
-    if (S.lastFix && !S.stale && Date.now() - S.lastFix > 6000) { S.stale = true; render(); }
-    if (T.overSince) renderTrip();
-  }, 1000);
-
-  function start() {
-    if (!('geolocation' in navigator)) { el.gateErr.hidden = false; el.gateErr.textContent = 'Este navegador não oferece geolocalização.'; return; }
-    if (!window.isSecureContext) { el.gateErr.hidden = false; el.gateErr.textContent = 'Abra esta página por HTTPS para o GPS funcionar.'; }
-    unlockAudio(); primeVoice(); keepAwake();
-    el.gate.hidden = true;
-    navigator.geolocation.watchPosition(onPosition, onError, { enableHighAccuracy: true, maximumAge: 1000, timeout: 15000 });
-  }
-
-  // ---------- Painéis ----------
-  function openSheet(sh) { el.scrim.hidden = false; sh.classList.add('open'); if (sh === el.sheetStats) renderTrip(); if (sh === el.sheetSettings) renderMapInfo(); }
-  function closeSheets() { el.scrim.hidden = true; el.sheetSettings.classList.remove('open'); el.sheetStats.classList.remove('open'); }
-  function renderMapInfo() {
-    const n = cacheList().length;
-    el.mapInfo.textContent = (area ? `Área atual: ${area.ways.length} vias, ${area.nodes.length} radares/lombadas, raio ${area.r} m. ` : '') + `${n} área${n === 1 ? '' : 's'} guardada${n === 1 ? '' : 's'} no celular (vale por 7 dias).`;
-  }
-  el.btnSettings.addEventListener('click', () => openSheet(el.sheetSettings));
-  el.btnStats.addEventListener('click', () => openSheet(el.sheetStats));
-  el.btnCloseSettings.addEventListener('click', closeSheets);
-  el.btnCloseStats.addEventListener('click', closeSheets);
-  el.scrim.addEventListener('click', closeSheets);
-  el.btnResetTrip.addEventListener('click', () => { if (confirm('Zerar as estatísticas da viagem?')) resetTrip(); });
-  el.btnRefreshMap.addEventListener('click', () => { if (S.lastPos) { ensureArea(S.lastPos, { force: true }); closeSheets(); } });
-
-  // ---------- Controles ----------
-  el.btnStart.addEventListener('click', start);
-  el.btnMinus.addEventListener('click', () => { const l = effectiveLimit().limit ?? 50; S.manualLimit = Math.max(10, l - 10); render(); });
-  el.btnPlus.addEventListener('click', () => { const l = effectiveLimit().limit ?? 50; S.manualLimit = Math.min(130, l + 10); render(); });
-  el.btnAuto.addEventListener('click', () => { S.manualLimit = null; render(); });
-  el.btnSound.addEventListener('click', () => { S.soundOn = !S.soundOn; savePrefs(); renderPrefs(); if (!S.soundOn) stopAlarm(); else if (S.state === 'danger') startAlarm(); });
-  const toggleVoice = () => { S.voiceOn = !S.voiceOn; savePrefs(); renderPrefs(); if (S.voiceOn) say('Avisos por voz ligados'); else { try { speechSynthesis.cancel(); } catch (e) {} } };
-  el.btnVoice.addEventListener('click', toggleVoice);
-  el.btnVoice2.addEventListener('click', toggleVoice);
-  el.btnTest.addEventListener('click', () => { unlockAudio(); playAlert(); setTimeout(playAlert, (SOUNDS[S.soundType] || SOUNDS.sirene).every); });
-  // No modo escuro, um toque na tela mostra tudo por alguns segundos
-  let peekTimer = null;
-  document.getElementById('app').addEventListener('pointerdown', () => {
-    if (!S.dim) return;
-    document.body.classList.add('peek'); clearTimeout(peekTimer);
-    peekTimer = setTimeout(() => document.body.classList.remove('peek'), 4000);
-  });
-
-  // ---------- Preferências (ficam salvas no celular) ----------
-  function loadPrefs() {
-    try {
-      const p = JSON.parse(localStorage.getItem('velocimetro-prefs') || '{}');
-      if (SOUNDS[p.soundType]) S.soundType = p.soundType;
-      S.dim = !!p.dim;
-      if (p.soundOn != null) S.soundOn = !!p.soundOn;
-      if (p.voiceOn != null) S.voiceOn = !!p.voiceOn;
-      if (p.radarOn != null) S.radarOn = !!p.radarOn;
-      if (['none', 'br', 'k5', 'p10'].includes(p.tolMode)) S.tolMode = p.tolMode;
-      if ([3, 5, 10].includes(p.warnMargin)) S.warnMargin = p.warnMargin;
-    } catch (e) {}
-  }
-  function savePrefs() { try { localStorage.setItem('velocimetro-prefs', JSON.stringify({ soundType: S.soundType, dim: S.dim, soundOn: S.soundOn, voiceOn: S.voiceOn, radarOn: S.radarOn, tolMode: S.tolMode, warnMargin: S.warnMargin })); } catch (e) {} }
-  function renderPrefs() {
-    el.sndBtns.forEach(b => b.classList.toggle('on', b.dataset.sound === S.soundType));
-    el.tolBtns.forEach(b => b.classList.toggle('on', b.dataset.tol === S.tolMode));
-    el.warnBtns.forEach(b => b.classList.toggle('on', +b.dataset.warn === S.warnMargin));
-    el.btnDim.classList.toggle('on', S.dim);
-    el.btnDim.textContent = S.dim ? '🌙 Escurecer: ligado' : '🌙 Escurecer quando OK';
-    el.btnRadar.classList.toggle('on', S.radarOn);
-    el.btnRadar.textContent = S.radarOn ? '📷 Radares e lombadas: ligado' : '📷 Avisar radares e lombadas';
-    el.btnVoice2.classList.toggle('on', S.voiceOn);
-    el.btnVoice2.textContent = S.voiceOn ? '🗣️ Avisos por voz: ligado' : '🗣️ Avisos por voz';
-    el.btnVoice.classList.toggle('off', !S.voiceOn);
-    el.btnSound.textContent = S.soundOn ? '🔔' : '🔕';
-    el.btnSound.classList.toggle('off', !S.soundOn);
-    document.body.classList.toggle('dim', S.dim);
-    if (!S.radarOn) { hazard = null; el.banner.hidden = true; }
-  }
-  el.sndBtns.forEach(b => b.addEventListener('click', () => {
-    S.soundType = b.dataset.sound; savePrefs(); renderPrefs();
-    unlockAudio(); playAlert();
-    if (beepTimer) { stopAlarm(); startAlarm(); }
-  }));
-  el.tolBtns.forEach(b => b.addEventListener('click', () => { S.tolMode = b.dataset.tol; savePrefs(); renderPrefs(); render(); }));
-  el.warnBtns.forEach(b => b.addEventListener('click', () => { S.warnMargin = +b.dataset.warn; savePrefs(); renderPrefs(); render(); }));
-  el.btnDim.addEventListener('click', () => { S.dim = !S.dim; savePrefs(); renderPrefs(); });
-  el.btnRadar.addEventListener('click', () => { S.radarOn = !S.radarOn; savePrefs(); renderPrefs(); });
-  loadPrefs(); renderPrefs(); loadTrip(); renderTrip();
-
-  // ---------- Instalar como app (PWA) ----------
-  let installEvt = null;
-  const standalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
-  window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installEvt = e; if (!standalone) el.btnInstall.hidden = false; });
-  el.btnInstall.addEventListener('click', async () => { if (!installEvt) return; installEvt.prompt(); await installEvt.userChoice; installEvt = null; el.btnInstall.hidden = true; });
-  if (!standalone && /iPhone|iPad|iPod/.test(navigator.userAgent)) {
-    el.installHint.hidden = false;
-    el.installHint.textContent = 'Para instalar no iPhone: toque em Compartilhar (quadrado com seta) e depois em "Adicionar à Tela de Início". Abre em tela cheia, como um app.';
-  }
-  if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => {
-      navigator.serviceWorker.register('./sw.js').catch(() => {});
-      let hadController = !!navigator.serviceWorker.controller;
-      navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController && el.gate.hidden === false) location.reload(); hadController = true; });
-    });
-  }
-
-  render();
-})();
-</script>
+<script src="./app.js"></script>
 </body>
 </html>
