@@ -402,6 +402,7 @@
     const now = Date.now();
     if (fetching && now - fetchStart > 90000) { fetching = false; lastFetchFail = now; mapStatus = 'mapa demorou demais — tentando de novo'; render(); }
     if (quickBusy && now - quickStart > 35000) quickBusy = false;
+    if (tileBusy && now - tileStart > 60000) tileBusy = false;
     if (checkingCache && now - fetchStart > 20000) checkingCache = false;
   }
 
@@ -471,6 +472,62 @@
       } else mapStatus = 'sem internet — usando mapa em cache';
       render();
     } finally { fetching = false; }
+  }
+
+  // ---------- Blocos locais (tiles/sp): o mapa da Grande São Paulo vem do próprio site, sem depender do Overpass ----------
+  // Gerados pela ação "Gerar blocos de vias" no GitHub (tools/build_tiles.py). Blocos de 0,02° (~2 km);
+  // o app usa o bloco onde está mais os 8 em volta. Fora da cobertura, continua usando o Overpass.
+  const TILES = { base: './tiles/sp/', cacheName: 'velocimetro-tiles', index: null, loading: true, tile: 0.02, failedAt: 0 };
+  let tileBusy = false, tileStart = 0;
+  const tileMem = new Map();   // chave -> {ways,nodes} ou null (bloco vazio)
+  async function tilesInit() {
+    try {
+      const r = await fetch(TILES.base + 'index.json', { cache: 'no-cache' });
+      if (r.ok) {
+        TILES.index = await r.json(); TILES.tile = TILES.index.tile || 0.02;
+        // Mapa novo (regerado no GitHub): joga fora os blocos antigos guardados no celular
+        const gen = String(TILES.index.generated || '');
+        if (localStorage.getItem('velocimetro-tiles-gen') !== gen) {
+          try { await caches.delete(TILES.cacheName); } catch (e) {}
+          try { localStorage.setItem('velocimetro-tiles-gen', gen); } catch (e) {}
+        }
+      }
+    } catch (e) {}
+    TILES.loading = false;
+  }
+  function inTiles(pos) { const b = TILES.index && TILES.index.bbox; return !!b && pos.lat >= b[0] && pos.lon >= b[1] && pos.lat < b[2] && pos.lon < b[3]; }
+  async function loadTile(ty, tx) {
+    const k = ty + '_' + tx;
+    if (tileMem.has(k)) return tileMem.get(k);
+    let t = null;
+    const r = await fetch(TILES.base + k + '.json');
+    if (r.ok) t = await r.json();
+    else if (r.status !== 404) throw new Error('HTTP ' + r.status);
+    tileMem.set(k, t);
+    if (tileMem.size > 60) tileMem.delete(tileMem.keys().next().value);
+    return t;
+  }
+  async function ensureTiles(pos) {
+    const T = TILES.tile, ty = Math.floor(pos.lat / T), tx = Math.floor(pos.lon / T), k = 't:' + ty + '_' + tx;
+    if (area && area.k === k) return;              // ainda no mesmo bloco central
+    if (tileBusy || Date.now() - TILES.failedAt < 8000) return;
+    tileBusy = true; tileStart = Date.now();
+    try {
+      if (!area) { mapStatus = 'carregando mapa local…'; render(); }
+      const jobs = [];
+      for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) jobs.push(loadTile(ty + a, tx + b));
+      const tiles = await Promise.all(jobs);
+      const ways = new Map(), nodes = new Map();
+      for (const t of tiles) if (t) { for (const w of t.ways) ways.set(w.i, w); for (const n of t.nodes) nodes.set(n.i, n); }
+      const a = { k, lat: (ty + 0.5) * T, lon: (tx + 0.5) * T, r: 1e7, t: Date.now(), ways: [...ways.values()], nodes: [...nodes.values()] };
+      if (area && area !== a) prevArea = area;
+      area = a;
+      mapStatus = 'mapa local de ' + (TILES.index.generated || '');
+      updateLimit(pos); render();
+    } catch (e) {
+      TILES.failedAt = Date.now();
+      if (!area) { mapStatus = 'sem internet — este trecho ainda não está guardado no celular'; render(); }
+    } finally { tileBusy = false; }
   }
 
   // Download antecipado: 7 áreas (centro + 6 em volta) cobrindo ~4 km de raio
@@ -923,8 +980,13 @@
     el.gpsText.textContent = pos.acc <= 25 ? 'GPS bom' : pos.acc <= 60 ? 'GPS regular' : 'GPS fraco';
     el.accText.textContent = `±${Math.round(pos.acc)} m`;
 
-    ensureArea(pos);
-    if (!area || (area.k === 'q' && haversine(pos, area) > 45)) quickLookup(pos);
+    if (TILES.loading) { /* ainda lendo o índice dos blocos */ }
+    else if (inTiles(pos)) ensureTiles(pos);
+    else {
+      if (area && area.k.startsWith('t:')) { prevArea = area; area = null; }
+      ensureArea(pos);
+      if (!area || (area.k === 'q' && haversine(pos, area) > 45)) quickLookup(pos);
+    }
     updateLimit(pos);
     lookAhead(pos);
     checkHazards(pos);
@@ -961,7 +1023,11 @@
   function closeSheets() { el.scrim.hidden = true; el.sheetSettings.classList.remove('open'); el.sheetStats.classList.remove('open'); }
   function renderMapInfo() {
     const n = areaIdx.length;
-    el.mapInfo.textContent = (area ? `Área atual: ${area.ways.length} vias, ${area.nodes.length} radares/lombadas do OSM, raio ${area.r} m. ` : 'Nenhuma área carregada ainda. ') + `${n} área${n === 1 ? '' : 's'} guardada${n === 1 ? '' : 's'} no celular. Radares oficiais carregados: ${radarCount}.` + (lastErr ? ` Último erro do mapa: ${lastErr}` : '');
+    const areaTxt = !area ? 'Nenhuma área carregada ainda. '
+      : area.k.startsWith('t:') ? `Mapa local da Grande SP (gerado em ${TILES.index && TILES.index.generated}): ${area.ways.length} vias e ${area.nodes.length} radares/lombadas em volta. `
+      : `Área atual (Overpass): ${area.ways.length} vias, ${area.nodes.length} radares/lombadas do OSM, raio ${area.r} m. `;
+    const cov = TILES.index ? `Mapa local cobre ${TILES.index.tiles} blocos (${TILES.index.ways} vias). ` : 'Mapa local ainda não disponível. ';
+    el.mapInfo.textContent = areaTxt + cov + `${n} área${n === 1 ? '' : 's'} do Overpass guardada${n === 1 ? '' : 's'} no celular. Radares oficiais carregados: ${radarCount}.` + (lastErr ? ` Último erro do mapa: ${lastErr}` : '');
   }
   function renderFixInfo() { const n = Object.keys(fixes).length; el.fixInfo.textContent = n ? `${n} via${n === 1 ? '' : 's'} com limite corrigido por você.` : 'Use − e + na tela principal: a correção fica salva para a via em que você está.'; }
   function renderPlaces() {
@@ -979,7 +1045,12 @@
   el.btnMapCur.addEventListener('click', () => openMap(T.start, 'Viagem atual'));
   el.btnGpxCur.addEventListener('click', () => exportTrip(T.start, 'gpx'));
   el.btnCsvCur.addEventListener('click', () => exportTrip(T.start, 'csv'));
-  el.btnRefreshMap.addEventListener('click', () => { if (S.lastPos) { areaFails = 0; quickFails = 0; lastFetchFail = 0; ensureArea(S.lastPos, { force: true }); closeSheets(); } });
+  el.btnRefreshMap.addEventListener('click', async () => {
+    if (!S.lastPos) return;
+    closeSheets();
+    if (inTiles(S.lastPos)) { tileMem.clear(); try { await caches.delete(TILES.cacheName); } catch (e) {} if (area && area.k.startsWith('t:')) { prevArea = area; area = null; } TILES.failedAt = 0; ensureTiles(S.lastPos); return; }
+    areaFails = 0; quickFails = 0; lastFetchFail = 0; ensureArea(S.lastPos, { force: true });
+  });
   el.btnClearFixes.addEventListener('click', () => { if (confirm('Apagar todas as suas correções de limite?')) { fixes = {}; saveFixes(); renderFixInfo(); if (S.lastPos) updateLimit(S.lastPos); render(); } });
   el.btnDlHere.addEventListener('click', () => { if (S.lastPos) downloadAround(S.lastPos, 'aqui'); else el.dlStatus.textContent = 'Ainda sem posição do GPS.'; });
   el.btnSaveHome.addEventListener('click', () => { if (S.lastPos) { S.places.casa = { lat: S.lastPos.lat, lon: S.lastPos.lon }; savePrefs(); renderPlaces(); } });
@@ -1099,6 +1170,6 @@
   }
 
   // ---------- Início ----------
-  (async () => { await DB.open(); await cacheLoadIndex(); await loadRadars(); if (S.lastPos) ensureArea(S.lastPos); render(); })();
+  (async () => { await DB.open(); await cacheLoadIndex(); await Promise.all([loadRadars(), tilesInit()]); if (S.lastPos) { if (inTiles(S.lastPos)) ensureTiles(S.lastPos); else ensureArea(S.lastPos); } render(); })();
   render();
 })();

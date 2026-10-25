@@ -1,5 +1,6 @@
 // Service worker: deixa o app abrir sem internet e atualiza sozinho quando há versão nova.
-const VERSION = 'velocimetro-v7';
+const VERSION = 'velocimetro-v8';
+const TILES = 'velocimetro-tiles';   // blocos do mapa local (tiles/sp); o app apaga este cache quando o mapa é regerado
 const SHELL = ['./', './index.html', './app.js', './manifest.json', './radares-sp.json', './icon.svg', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
@@ -8,7 +9,7 @@ self.addEventListener('install', e => {
 
 self.addEventListener('activate', e => {
   e.waitUntil(
-    caches.keys().then(keys => Promise.all(keys.filter(k => k !== VERSION).map(k => caches.delete(k))))
+    caches.keys().then(keys => Promise.all(keys.filter(k => k !== VERSION && k !== TILES).map(k => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });
@@ -22,12 +23,25 @@ self.addEventListener('fetch', e => {
   if (url.pathname.includes('/interpreter') || url.hostname.includes('overpass') || url.hostname.endsWith('tile.openstreetmap.org')) return;
 
   if (url.origin === location.origin) {
+    if (url.pathname.includes('/tiles/') && !url.pathname.endsWith('index.json')) {
+      // Blocos do mapa local: usa o que já está no celular; senão baixa e guarda (valem até o mapa ser regerado).
+      e.respondWith(
+        caches.open(TILES).then(async c => {
+          const cached = await c.match(req);
+          if (cached) return cached;
+          const res = await fetch(req);
+          if (res && res.ok) c.put(req, res.clone());
+          return res;
+        })
+      );
+      return;
+    }
     // Arquivos do app: tenta a rede (para pegar atualização) e cai no cache se estiver offline.
     e.respondWith(
       fetch(req).then(res => {
         if (res && res.ok) { const copy = res.clone(); caches.open(VERSION).then(c => c.put(req, copy)); }
         return res;
-      }).catch(() => caches.match(req, { ignoreSearch: true }).then(r => r || caches.match('./index.html')))
+      }).catch(() => caches.match(req, { ignoreSearch: true }).then(r => r || (req.mode === 'navigate' ? caches.match('./index.html') : Response.error())))
     );
     return;
   }
