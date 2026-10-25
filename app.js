@@ -293,7 +293,7 @@
   // Para a área grande, deixa de fora "service" (estacionamentos, entradas de garagem): são milhares de vias
   // sem limite em cidade grande e deixavam a resposta enorme e lenta.
   const HW_RE_AREA = '^(motorway|trunk|primary|secondary|tertiary|unclassified|residential|living_street|motorway_link|trunk_link|primary_link|secondary_link|tertiary_link)$';
-  let epIndex = 0, fetching = false, fetchStart = 0, lastErr = '', lastFetchFail = 0, checkingCache = false;
+  let epIndex = 0, fetching = false, fetchStart = 0, lastErr = '', lastFetchFail = 0, areaFails = 0, checkingCache = false;
   let area = null;        // {k, lat, lon, r, t, ways:[{i,h,n,m,f,b,c,o,g:[[lat,lon],...]}], nodes:[{i,k,lat,lon,m,n}]}
   let prevArea = null;    // área anterior, ainda usada até a nova cobrir a posição
   let areaIdx = [];       // metadados das áreas guardadas [{k, lat, lon, r, t}]
@@ -343,7 +343,10 @@
       try {
         if (onStatus) onStatus(`servidor ${i + 1}/${maxTries} (${host})`);
         const r = await fetch(url + '?data=' + encodeURIComponent(q), { signal: ctrl.signal, cache: 'no-store', headers: { Accept: 'application/json' } });
-        if (!r.ok) throw new Error('HTTP ' + r.status);
+        if (!r.ok) {
+          if (r.status === 429) { const ra = parseInt(r.headers.get('Retry-After') || '0', 10); if (ra > 0) lastFetchFail = Date.now() + Math.min(ra, 120) * 1000 - 8000; }
+          throw new Error('HTTP ' + r.status);
+        }
         const txt = await r.text();
         let j;
         try { j = JSON.parse(txt); } catch (e) { throw new Error('resposta inválida'); }
@@ -355,6 +358,7 @@
         return els;
       } catch (e) {
         errs.push(host + ': ' + (e.name === 'AbortError' ? 'tempo esgotado' : (e.message || 'falha de rede')));
+        if (i < maxTries - 1) await new Promise(r2 => setTimeout(r2, 3000));
       } finally { clearTimeout(to); }
     }
     epIndex = (epIndex + maxTries) % ENDPOINTS.length; // na próxima tentativa, começa por outros servidores
@@ -366,22 +370,28 @@
     return `[out:json][timeout:20];(way(around:${at})["highway"~"${HW_RE_AREA}"];node(around:${at})["highway"="speed_camera"];node(around:${at})["traffic_calming"~"^(bump|hump|table|cushion|yes|rumble_strip|choker)$"];);out tags geom;`;
   }
   // Consulta rápida só da via onde estou (raio 60 m): responde em ~1 s e mostra o limite enquanto a área grande carrega
-  let quickBusy = false, quickStart = 0, lastQuick = 0;
+  let quickBusy = false, quickStart = 0, lastQuick = 0, quickFails = 0;
   async function quickLookup(pos) {
-    if (quickBusy || Date.now() - lastQuick < 6000) return;
+    // Nunca em paralelo com o download da área: dois pedidos ao mesmo tempo do mesmo celular
+    // são o que faz o servidor responder "HTTP 429" (pedidos demais).
+    if (quickBusy || fetching) return;
+    const wait = Math.min(6000 * Math.pow(2, quickFails), 120000);   // 6 s, 12 s, 24 s… até 2 min
+    if (Date.now() - lastQuick < wait) return;
     quickBusy = true; quickStart = Date.now(); lastQuick = Date.now();
     try {
       const q = `[out:json][timeout:8];way(around:60,${pos.lat.toFixed(5)},${pos.lon.toFixed(5)})["highway"~"${HW_RE}"];out tags geom;`;
-      const els = await overpass(q, { timeoutMs: 9000, maxTries: 3 });
+      const els = await overpass(q, { timeoutMs: 9000, maxTries: 2 });
+      quickFails = 0;
       const a = Object.assign({ k: 'q', lat: pos.lat, lon: pos.lon, r: 60, t: Date.now() }, compact(els));
       if (!area || area.k === 'q') { area = a; if (!mapStatus.startsWith('serviço')) mapStatus = 'via consultada · carregando mapa da área…'; }
       updateLimit(pos); render();
     } catch (e) {
+      quickFails++;
       if (!area) { mapStatus = 'serviço de mapas indisponível — ' + lastErr; render(); }
     } finally { quickBusy = false; }
   }
   async function fetchArea(c, r, onStatus) {
-    const els = await overpass(areaQuery(c, r), { timeoutMs: 25000, maxTries: 3, onStatus, mustHaveWays: true });
+    const els = await overpass(areaQuery(c, r), { timeoutMs: 25000, maxTries: ENDPOINTS.length, onStatus, mustHaveWays: true });
     const a = Object.assign({ k: 'a:' + [c.lat.toFixed(4), c.lon.toFixed(4), r, Date.now()].join(','), lat: c.lat, lon: c.lon, r, t: Date.now() }, compact(els));
     await cachePut(a);
     return a;
@@ -438,8 +448,9 @@
       try { const c = await cacheFind(pos); if (c && (!area || c.k !== area.k)) { setArea(c, 'cache'); render(); return; } }
       finally { checkingCache = false; }
     }
-    if (fetching) return;
-    if (!force && now - lastFetchFail < 8000) return;
+    if (fetching || quickBusy) return;
+    const wait = Math.min(8000 * Math.pow(2, areaFails), 180000);   // 8 s, 16 s, 32 s… até 3 min entre tentativas
+    if (!force && now - lastFetchFail < wait) return;
     fetching = true; fetchStart = now;
     // Centro um pouco à frente do carro, para cobrir mais do caminho que vem
     const r = S.speedKmh > 70 ? AREA.rFast : AREA.rCity;
@@ -449,9 +460,10 @@
       if (!area) { mapStatus = 'carregando mapa…'; render(); }
       if (force) await cacheDropCovering(pos);
       const a = await fetchArea(c, r, onStatus);
+      areaFails = 0;
       setArea(a, 'net'); render();
     } catch (e) {
-      lastFetchFail = Date.now();
+      lastFetchFail = Date.now(); areaFails++;
       if (!area || area.k === 'q') {
         const old = await cacheFind(pos, { force: true });
         if (old) setArea(old, 'cache-old');
@@ -967,7 +979,7 @@
   el.btnMapCur.addEventListener('click', () => openMap(T.start, 'Viagem atual'));
   el.btnGpxCur.addEventListener('click', () => exportTrip(T.start, 'gpx'));
   el.btnCsvCur.addEventListener('click', () => exportTrip(T.start, 'csv'));
-  el.btnRefreshMap.addEventListener('click', () => { if (S.lastPos) { ensureArea(S.lastPos, { force: true }); closeSheets(); } });
+  el.btnRefreshMap.addEventListener('click', () => { if (S.lastPos) { areaFails = 0; quickFails = 0; lastFetchFail = 0; ensureArea(S.lastPos, { force: true }); closeSheets(); } });
   el.btnClearFixes.addEventListener('click', () => { if (confirm('Apagar todas as suas correções de limite?')) { fixes = {}; saveFixes(); renderFixInfo(); if (S.lastPos) updateLimit(S.lastPos); render(); } });
   el.btnDlHere.addEventListener('click', () => { if (S.lastPos) downloadAround(S.lastPos, 'aqui'); else el.dlStatus.textContent = 'Ainda sem posição do GPS.'; });
   el.btnSaveHome.addEventListener('click', () => { if (S.lastPos) { S.places.casa = { lat: S.lastPos.lat, lon: S.lastPos.lon }; savePrefs(); renderPlaces(); } });

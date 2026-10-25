@@ -1,5 +1,5 @@
 // Service worker: deixa o app abrir sem internet e atualiza sozinho quando há versão nova.
-const VERSION = 'velocimetro-v6';
+const VERSION = 'velocimetro-v7';
 const SHELL = ['./', './index.html', './app.js', './manifest.json', './radares-sp.json', './icon.svg', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
