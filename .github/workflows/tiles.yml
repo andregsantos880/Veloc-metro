@@ -2,12 +2,10 @@ name: Gerar blocos de vias (OpenStreetMap)
 
 # Baixa o mapa do Sudeste no Geofabrik, recorta a Grande São Paulo (e arredores: Campinas, Jundiaí,
 # Sorocaba, São José dos Campos, Baixada Santista), gera os blocos em tiles/sp e publica.
-# Roda quando pedido (botão "Run workflow") e automaticamente no dia 1 de cada mês.
+# Roda só quando pedido (botão "Run workflow" na aba Actions). Os blocos ficam como estão até lá.
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '17 6 1 * *'
 
 permissions:
   contents: write
