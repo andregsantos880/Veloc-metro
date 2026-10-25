@@ -268,10 +268,13 @@
   // ---------- Overpass (limite da via) ----------
   const ENDPOINTS = [
     'https://overpass-api.de/api/interpreter',
-    'https://overpass.kumi.systems/api/interpreter',
+    'https://lz4.overpass-api.de/api/interpreter',
+    'https://z.overpass-api.de/api/interpreter',
+    'https://overpass.osm.ch/api/interpreter',
+    'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
     'https://overpass.private.coffee/api/interpreter',
   ];
-  let epIndex = 0, querying = false;
+  let epIndex = 0, querying = false, lastErr = '';
 
   function parseMaxspeed(v) {
     if (!v) return null;
@@ -282,20 +285,25 @@
   }
 
   async function fetchRoad(lat, lon) {
-    const q = `[out:json][timeout:8];way(around:30,${lat},${lon})["highway"~"^(motorway|trunk|primary|secondary|tertiary|unclassified|residential|living_street|service|motorway_link|trunk_link|primary_link|secondary_link|tertiary_link)$"];out tags geom;`;
+    const q = `[out:json][timeout:10];way(around:40,${lat.toFixed(6)},${lon.toFixed(6)})["highway"~"^(motorway|trunk|primary|secondary|tertiary|unclassified|residential|living_street|service|motorway_link|trunk_link|primary_link|secondary_link|tertiary_link)$"];out tags geom;`;
+    const errs = [];
     for (let i = 0; i < ENDPOINTS.length; i++) {
       const url = ENDPOINTS[(epIndex + i) % ENDPOINTS.length];
+      const host = url.replace(/^https?:\/\//, '').split('/')[0];
       try {
-        const ctrl = new AbortController(); const to = setTimeout(() => ctrl.abort(), 9000);
-        const r = await fetch(url, { method: 'POST', body: 'data=' + encodeURIComponent(q), signal: ctrl.signal,
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
+        const ctrl = new AbortController(); const to = setTimeout(() => ctrl.abort(), 12000);
+        const r = await fetch(url + '?data=' + encodeURIComponent(q), { signal: ctrl.signal, cache: 'no-store' });
         clearTimeout(to);
         if (!r.ok) throw new Error('HTTP ' + r.status);
         const j = await r.json();
         epIndex = (epIndex + i) % ENDPOINTS.length;
+        lastErr = '';
         return j.elements || [];
-      } catch (e) { /* tenta o próximo */ }
+      } catch (e) {
+        errs.push(host.split('.')[0] + ': ' + (e.name === 'AbortError' ? 'tempo esgotado' : (e.message || 'falha de rede')));
+      }
     }
+    lastErr = errs.join(' · ');
     throw new Error('overpass');
   }
 
@@ -331,7 +339,8 @@
         : S.autoSource === 'estimated' ? 'sem placa no mapa — limite estimado pelo tipo da via'
         : 'sem dado de limite para esta via';
     } catch (e) {
-      el.roadMeta.textContent = 'sem conexão com o serviço de mapas — tentando de novo';
+      el.roadMeta.textContent = 'serviço de mapas indisponível — ' + (lastErr || 'tentando de novo');
+      el.roadMeta.style.whiteSpace = 'normal';
     } finally { querying = false; render(); }
   }
 
