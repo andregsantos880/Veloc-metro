@@ -1,0 +1,67 @@
+name: Gerar blocos de vias (OpenStreetMap)
+
+# Baixa o mapa do Sudeste no Geofabrik, recorta a Grande São Paulo (e arredores: Campinas, Jundiaí,
+# Sorocaba, São José dos Campos, Baixada Santista), gera os blocos em tiles/sp e publica.
+# Roda quando pedido (botão "Run workflow") e automaticamente no dia 1 de cada mês.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 6 1 * *'
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: tiles
+  cancel-in-progress: false
+
+env:
+  # sul, oeste, norte, leste  (osmium usa oeste,sul,leste,norte)
+  BBOX: '-47.55,-24.05,-45.80,-22.85'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar ferramentas
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq osmium-tool
+          python3 -m pip install --quiet osmium
+
+      - name: Baixar mapa do Sudeste (Geofabrik)
+        run: |
+          curl -fL --retry 5 --retry-delay 20 -o sudeste.osm.pbf https://download.geofabrik.de/south-america/brazil/sudeste-latest.osm.pbf
+          ls -lh sudeste.osm.pbf
+
+      - name: Recortar a Grande São Paulo
+        run: |
+          osmium extract -b "$BBOX" --strategy complete_ways -o sp.osm.pbf sudeste.osm.pbf
+          ls -lh sp.osm.pbf
+          rm sudeste.osm.pbf
+
+      - name: Gerar blocos
+        run: |
+          mkdir -p tiles/sp
+          python3 tools/build_tiles.py sp.osm.pbf tiles/sp
+          du -sh tiles/sp
+          cat tiles/sp/index.json
+
+      - name: Guardar no repositório
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A tiles/sp
+          if git diff --cached --quiet; then echo "Nada mudou."; exit 0; fi
+          git commit -m "Atualiza blocos de vias da Grande SP ($(date -u +%Y-%m-%d))"
+          git push
+
+      - name: Publicar no GitHub Pages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run pages.yml --ref main
