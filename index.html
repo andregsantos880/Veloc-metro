@@ -116,6 +116,22 @@
   .gate button { width: min(100%, 320px); flex: none; }
   .gate .err { color: var(--danger); margin-top: 16px; font-size: 14px; }
   [hidden] { display: none !important; }
+
+  /* Modo escuro quando está tudo certo: apaga quase tudo, acende no amarelo/vermelho */
+  body.dim:not(.state-warn):not(.state-danger) { background: #000; }
+  body.dim:not(.state-warn):not(.state-danger) .top,
+  body.dim:not(.state-warn):not(.state-danger) .bottom,
+  body.dim:not(.state-warn):not(.state-danger) .unit,
+  body.dim:not(.state-warn):not(.state-danger) .status { opacity: .18; transition: opacity .4s; }
+  body.dim:not(.state-warn):not(.state-danger) .speed { color: #4a5560; transition: color .4s; }
+  body.dim .top:active, body.dim .bottom:active { opacity: 1; }
+
+  /* Seletor de som */
+  .seg { display: flex; align-items: center; gap: 8px; }
+  .seg .label { flex: none; color: var(--muted); font-size: 13px; width: 56px; }
+  .seg button { padding: 11px 6px; font-size: 14px; border-radius: 10px; }
+  .seg button.on { background: var(--fg); color: #0b0f14; border-color: transparent; }
+  button.toggle.on { border-color: var(--ok); color: var(--ok); }
 </style>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@700&family=Barlow:wght@400;600&display=swap">
@@ -155,6 +171,15 @@
       <button class="small" id="btnPlus" aria-label="Aumentar limite">+</button>
       <button class="small" id="btnAuto" aria-label="Voltar ao automático" hidden>Auto</button>
     </div>
+    <div class="seg" role="group" aria-label="Tipo de alerta">
+      <span class="label">Alerta</span>
+      <button data-sound="sirene" id="snd0">Sirene</button>
+      <button data-sound="bipe" id="snd1">Bipe</button>
+      <button data-sound="buzina" id="snd2">Buzina</button>
+    </div>
+    <div class="row">
+      <button class="toggle" id="btnDim">🌙 Escurecer quando OK</button>
+    </div>
     <div class="row">
       <button id="btnSound">🔔 Som: ligado</button>
       <button id="btnTest">Testar alerta</button>
@@ -174,7 +199,8 @@
     sign: $('sign'), roadName: $('roadName'), roadMeta: $('roadMeta'),
     speed: $('speed'), status: $('status'),
     btnMinus: $('btnMinus'), btnPlus: $('btnPlus'), btnAuto: $('btnAuto'), manualLabel: $('manualLabel'),
-    btnSound: $('btnSound'), btnTest: $('btnTest'),
+    btnSound: $('btnSound'), btnTest: $('btnTest'), btnDim: $('btnDim'),
+    sndBtns: Array.from(document.querySelectorAll('[data-sound]')),
     gpsDot: $('gpsDot'), gpsText: $('gpsText'), accText: $('accText'),
   };
 
@@ -188,6 +214,8 @@
     manualLimit: null,
     lastQuery: null,        // {lat, lon, t}
     soundOn: true,
+    soundType: 'sirene',   // 'sirene' | 'bipe' | 'buzina'
+    dim: false,
     state: 'ok',
     wakeLock: null,
   };
@@ -257,11 +285,36 @@
       }
     } catch (e) {}
   }
+  // Buzina: tom grave duplo (como buzina de caminhão), com harmônico
+  function horn(dur = 0.6) {
+    if (!S.soundOn || !ctx) return;
+    try {
+      const t = ctx.currentTime, g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(1.0, t + 0.02);
+      g.gain.setValueAtTime(1.0, t + dur - 0.08);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      g.connect(out());
+      for (const [type, f] of [['sawtooth', 220], ['sawtooth', 277], ['square', 440]]) {
+        const o = ctx.createOscillator(); o.type = type; o.frequency.value = f;
+        o.connect(g); o.start(t); o.stop(t + dur);
+      }
+    } catch (e) {}
+  }
+  // Bipe: três toques agudos e secos
+  function beeps() {
+    beep(1400, 0.12, 1.0); setTimeout(() => beep(1400, 0.12, 1.0), 160); setTimeout(() => beep(1400, 0.12, 1.0), 320);
+  }
+  const SOUNDS = {
+    sirene: { play: () => siren(0.55), every: 700 },
+    bipe:   { play: beeps,              every: 900 },
+    buzina: { play: () => horn(0.6),    every: 1000 },
+  };
+  function playAlert() { (SOUNDS[S.soundType] || SOUNDS.sirene).play(); try { navigator.vibrate && navigator.vibrate([250, 100, 250]); } catch (e) {} }
   function startAlarm() {
     if (beepTimer) return;
-    const fire = () => { siren(0.55); try { navigator.vibrate && navigator.vibrate([250, 100, 250]); } catch (e) {} };
-    fire();
-    beepTimer = setInterval(fire, 700);
+    playAlert();
+    beepTimer = setInterval(playAlert, (SOUNDS[S.soundType] || SOUNDS.sirene).every);
   }
   function stopAlarm() { if (beepTimer) { clearInterval(beepTimer); beepTimer = null; } }
 
@@ -452,7 +505,30 @@
   el.btnPlus.addEventListener('click', () => { const l = effectiveLimit().limit ?? 50; S.manualLimit = Math.min(130, l + 10); render(); });
   el.btnAuto.addEventListener('click', () => { S.manualLimit = null; render(); });
   el.btnSound.addEventListener('click', () => { S.soundOn = !S.soundOn; el.btnSound.textContent = S.soundOn ? '🔔 Som: ligado' : '🔕 Som: desligado'; if (!S.soundOn) stopAlarm(); else if (S.state === 'danger') startAlarm(); });
-  el.btnTest.addEventListener('click', () => { unlockAudio(); siren(0.55); setTimeout(() => siren(0.55), 700); try { navigator.vibrate && navigator.vibrate([250, 100, 250]); } catch (e) {} });
+  el.btnTest.addEventListener('click', () => { unlockAudio(); playAlert(); setTimeout(playAlert, (SOUNDS[S.soundType] || SOUNDS.sirene).every); });
+
+  // ---------- Preferências (ficam salvas no celular) ----------
+  function loadPrefs() {
+    try {
+      const p = JSON.parse(localStorage.getItem('velocimetro-prefs') || '{}');
+      if (SOUNDS[p.soundType]) S.soundType = p.soundType;
+      S.dim = !!p.dim;
+    } catch (e) {}
+  }
+  function savePrefs() { try { localStorage.setItem('velocimetro-prefs', JSON.stringify({ soundType: S.soundType, dim: S.dim })); } catch (e) {} }
+  function renderPrefs() {
+    el.sndBtns.forEach(b => b.classList.toggle('on', b.dataset.sound === S.soundType));
+    el.btnDim.classList.toggle('on', S.dim);
+    el.btnDim.textContent = S.dim ? '🌙 Escurecer: ligado' : '🌙 Escurecer quando OK';
+    document.body.classList.toggle('dim', S.dim);
+  }
+  el.sndBtns.forEach(b => b.addEventListener('click', () => {
+    S.soundType = b.dataset.sound; savePrefs(); renderPrefs();
+    unlockAudio(); playAlert();
+    if (beepTimer) { stopAlarm(); startAlarm(); }
+  }));
+  el.btnDim.addEventListener('click', () => { S.dim = !S.dim; savePrefs(); renderPrefs(); });
+  loadPrefs(); renderPrefs();
 
   render();
 })();
