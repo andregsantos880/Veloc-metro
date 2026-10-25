@@ -11,6 +11,7 @@
     btnMinus: $('btnMinus'), btnPlus: $('btnPlus'), btnAuto: $('btnAuto'),
     btnSound: $('btnSound'), btnSoundOn: $('btnSoundOn'), btnVoice: $('btnVoice'), btnVoice2: $('btnVoice2'), btnStats: $('btnStats'), btnSettings: $('btnSettings'),
     btnTest: $('btnTest'), btnRadar: $('btnRadar'), btnAhead: $('btnAhead'), btnHud: $('btnHud'), btnHudExit: $('btnHudExit'), nightInfo: $('nightInfo'),
+    navDest: $('navDest'), btnNavGo: $('btnNavGo'), btnNavWaze: $('btnNavWaze'), navChips: $('navChips'),
     btnDlHere: $('btnDlHere'), btnSaveHome: $('btnSaveHome'), btnSaveWork: $('btnSaveWork'), btnDlHome: $('btnDlHome'), btnDlWork: $('btnDlWork'), dlStatus: $('dlStatus'),
     btnInstall: $('btnInstall'), installHint: $('installHint'), btnRefreshMap: $('btnRefreshMap'), lnkOsm: $('lnkOsm'), mapInfo: $('mapInfo'),
     btnClearFixes: $('btnClearFixes'), fixInfo: $('fixInfo'),
@@ -1034,6 +1035,7 @@
     el.btnDlHome.hidden = !S.places.casa; el.btnDlWork.hidden = !S.places.trabalho;
     el.btnSaveHome.textContent = S.places.casa ? '📍 Casa salva (tocar para trocar)' : '📍 Salvar aqui como Casa';
     el.btnSaveWork.textContent = S.places.trabalho ? '📍 Trabalho salvo (tocar para trocar)' : '📍 Salvar aqui como Trabalho';
+    renderNavChips();
     if (S.lastPos) { const st = sunTimes(S.lastPos.lat, S.lastPos.lon); if (st) el.nightInfo.textContent = `Hoje: nasce ${st.rise.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}, põe ${st.set.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}.`; }
   }
   el.btnSettings.addEventListener('click', () => openSheet(el.sheetSettings));
@@ -1053,6 +1055,43 @@
   });
   el.btnClearFixes.addEventListener('click', () => { if (confirm('Apagar todas as suas correções de limite?')) { fixes = {}; saveFixes(); renderFixInfo(); if (S.lastPos) updateLimit(S.lastPos); render(); } });
   el.btnDlHere.addEventListener('click', () => { if (S.lastPos) downloadAround(S.lastPos, 'aqui'); else el.dlStatus.textContent = 'Ainda sem posição do GPS.'; });
+  // ---------- Navegação: abre o Google Maps (ou Waze) já com a rota ----------
+  let navRecent = [];
+  try { navRecent = JSON.parse(localStorage.getItem('velocimetro-nav') || '[]'); } catch (e) { navRecent = []; }
+  function navTarget() {
+    const v = el.navDest.value.trim();
+    if (v) return { q: v, label: v };
+    return null;
+  }
+  function navOpen(app, target) {
+    if (!target) { el.navDest.focus(); return; }
+    const dest = target.lat != null ? `${target.lat.toFixed(6)},${target.lon.toFixed(6)}` : target.q;
+    let url;
+    if (app === 'waze') url = target.lat != null ? `https://waze.com/ul?ll=${dest}&navigate=yes` : `https://waze.com/ul?q=${encodeURIComponent(dest)}&navigate=yes`;
+    else url = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(dest)}&travelmode=driving&dir_action=navigate`;
+    if (target.q) {
+      navRecent = [target.q, ...navRecent.filter(x => x !== target.q)].slice(0, 6);
+      try { localStorage.setItem('velocimetro-nav', JSON.stringify(navRecent)); } catch (e) {}
+      renderNavChips();
+    }
+    window.open(url, '_blank', 'noopener');
+  }
+  function renderNavChips() {
+    const chips = [];
+    if (S.places.casa) chips.push({ t: '🏠 Casa', go: { lat: S.places.casa.lat, lon: S.places.casa.lon } });
+    if (S.places.trabalho) chips.push({ t: '💼 Trabalho', go: { lat: S.places.trabalho.lat, lon: S.places.trabalho.lon } });
+    for (const q of navRecent) chips.push({ t: q.length > 28 ? q.slice(0, 27) + '…' : q, go: { q } });
+    el.navChips.replaceChildren(...chips.map(c => {
+      const b = document.createElement('button'); b.type = 'button'; b.textContent = c.t;
+      b.addEventListener('click', () => { if (c.go.q) el.navDest.value = c.go.q; navOpen('google', c.go); });
+      return b;
+    }));
+  }
+  el.btnNavGo.addEventListener('click', () => navOpen('google', navTarget()));
+  el.btnNavWaze.addEventListener('click', () => navOpen('waze', navTarget()));
+  el.navDest.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); el.navDest.blur(); navOpen('google', navTarget()); } });
+  renderNavChips();
+
   el.btnSaveHome.addEventListener('click', () => { if (S.lastPos) { S.places.casa = { lat: S.lastPos.lat, lon: S.lastPos.lon }; savePrefs(); renderPlaces(); } });
   el.btnSaveWork.addEventListener('click', () => { if (S.lastPos) { S.places.trabalho = { lat: S.lastPos.lat, lon: S.lastPos.lon }; savePrefs(); renderPlaces(); } });
   el.btnDlHome.addEventListener('click', () => S.places.casa && downloadAround(S.places.casa, 'Casa'));

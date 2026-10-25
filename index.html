@@ -201,6 +201,14 @@
   .seg button.on { background: var(--fg); color: #0b0f14; border-color: transparent; }
   .sheet .row { display: flex; gap: 8px; margin-top: 8px; }
   .sheet .hint { color: var(--muted); font-size: 13px; margin-top: 6px; line-height: 1.4; }
+  .sheet input[type=text] {
+    font: inherit; color: var(--fg); background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.12);
+    border-radius: 14px; padding: 13px 14px; flex: 1; min-width: 0; outline: none;
+  }
+  .sheet input[type=text]:focus { border-color: var(--warn); }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+  .chips button { flex: none; padding: 9px 12px; font-size: 14px; border-radius: 999px; font-weight: 500; }
+  .chips:empty { display: none; }
   .sheet a.btn { display: block; text-align: center; text-decoration: none; flex: 1; }
   .sheet a.btn button { width: 100%; }
   .closer { margin-top: 18px; }
@@ -288,6 +296,12 @@
 
 <div class="sheet" id="sheetSettings" role="dialog" aria-label="Ajustes">
   <h2>Ajustes</h2>
+
+  <h3>Navegação</h3>
+  <div class="row"><input type="text" id="navDest" placeholder="Endereço ou lugar de destino" autocomplete="off" enterkeyhint="go"></div>
+  <div class="row"><button class="primary" id="btnNavGo">🧭 Abrir no Google Maps</button><button id="btnNavWaze" class="icon" title="Abrir no Waze">W</button></div>
+  <div class="chips" id="navChips"></div>
+  <div class="hint">Abre o app de mapas já com a rota. Enquanto ele estiver na frente, o Velocímetro fica pausado — no iPhone, páginas em segundo plano não recebem GPS.</div>
 
   <h3>Som do alerta</h3>
   <div class="seg" role="group" aria-label="Tipo de alerta">
