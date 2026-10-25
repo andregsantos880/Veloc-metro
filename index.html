@@ -1,0 +1,421 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#0b0f14">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Velocímetro Alerta</title>
+<style>
+  /* Layout: painel de carro em tela cheia — velocidade gigante no centro, placa da via no topo. */
+  :root {
+    --bg: #0b0f14;
+    --panel: #121820;
+    --fg: #f2f5f8;
+    --muted: #8a97a6;
+    --ok: #2ecc71;
+    --warn: #f5c518;
+    --danger: #e5322d;
+    --sign-red: #d7261e;
+    --font-num: "Barlow Condensed", "Arial Narrow", Impact, sans-serif;
+    --font-ui: "Barlow", system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--font-ui);
+    overflow: hidden;
+    -webkit-user-select: none; user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    transition: background .35s ease;
+  }
+  body.state-warn { background: #3a2f05; }
+  body.state-danger { background: #5a0f0c; animation: flash 1s steps(2, end) infinite; }
+  @keyframes flash { 50% { background: #a61b16; } }
+  @media (prefers-reduced-motion: reduce) { body.state-danger { animation: none; } }
+
+  .app {
+    height: 100%;
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    padding-top: max(12px, env(safe-area-inset-top, 0px));
+    padding-bottom: max(12px, env(safe-area-inset-bottom, 0px));
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+  }
+
+  /* Topo: placa de limite + nome da via */
+  .top {
+    display: flex; align-items: center; gap: 14px;
+  }
+  .sign {
+    flex: none;
+    width: 86px; height: 86px; border-radius: 50%;
+    background: #fff; border: 10px solid var(--sign-red);
+    display: grid; place-items: center;
+    font-family: var(--font-num); font-weight: 700; font-size: 38px; color: #111;
+    font-variant-numeric: tabular-nums;
+    box-shadow: 0 2px 12px rgba(0,0,0,.4);
+  }
+  .sign.estimated { border-style: dashed; border-width: 6px; }
+  .sign.unknown { color: #999; font-size: 30px; }
+  .road { min-width: 0; flex: 1; }
+  .road-name {
+    font-weight: 600; font-size: 20px; line-height: 1.15;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .road-meta { color: var(--muted); font-size: 13px; margin-top: 4px; letter-spacing: .02em; }
+
+  /* Centro: velocidade */
+  .center {
+    display: grid; place-items: center; text-align: center; min-height: 0;
+  }
+  .speed {
+    font-family: var(--font-num); font-weight: 700;
+    font-size: clamp(120px, 42vh, 220px); line-height: .9;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -.02em;
+  }
+  .unit { color: var(--muted); font-size: 22px; letter-spacing: .12em; text-transform: uppercase; margin-top: 8px; }
+  .status { margin-top: 14px; font-size: 15px; color: var(--muted); min-height: 1.4em; }
+  body.state-warn .status, body.state-danger .status { color: var(--fg); font-weight: 600; }
+
+  /* Rodapé: controles */
+  .bottom { display: grid; gap: 10px; }
+  .row { display: flex; gap: 10px; }
+  button {
+    font: inherit; font-weight: 600; color: var(--fg);
+    background: var(--panel); border: 1px solid rgba(255,255,255,.12);
+    border-radius: 14px; padding: 14px 16px; cursor: pointer;
+    flex: 1; min-width: 0;
+  }
+  button:active { transform: scale(.98); }
+  button:focus-visible { outline: 2px solid var(--warn); outline-offset: 2px; }
+  button.primary { background: var(--ok); color: #06260f; border-color: transparent; font-size: 18px; }
+  button.small { flex: none; padding: 12px 16px; font-size: 20px; line-height: 1; }
+  .manual { display: flex; align-items: center; gap: 10px; }
+  .manual .label { flex: 1; color: var(--muted); font-size: 13px; }
+  .gps { display: flex; justify-content: space-between; color: var(--muted); font-size: 12px; letter-spacing: .03em; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); margin-right: 6px; vertical-align: middle; }
+  .dot.on { background: var(--ok); }
+  .dot.bad { background: var(--danger); }
+
+  /* Tela inicial */
+  .gate {
+    position: fixed; inset: 0; background: var(--bg); z-index: 5;
+    display: grid; place-items: center; text-align: center;
+    padding: 24px max(16px, env(safe-area-inset-right, 0px)) 24px max(16px, env(safe-area-inset-left, 0px));
+  }
+  .gate h1 { font-family: var(--font-num); font-weight: 700; font-size: 44px; margin: 0 0 8px; }
+  .gate p { color: var(--muted); max-width: 32ch; margin: 0 auto 24px; line-height: 1.45; }
+  .gate button { width: min(100%, 320px); flex: none; }
+  .gate .err { color: var(--danger); margin-top: 16px; font-size: 14px; }
+  [hidden] { display: none !important; }
+</style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@700&family=Barlow:wght@400;600&display=swap">
+</head>
+<body>
+
+<div class="gate" id="gate">
+  <div>
+    <h1>Velocímetro Alerta</h1>
+    <p>Mostra sua velocidade pelo GPS e o limite da via em que você está. Acima do limite a tela fica vermelha e toca um alerta.</p>
+    <button class="primary" id="btnStart">Iniciar e permitir localização</button>
+    <div class="err" id="gateErr" hidden></div>
+  </div>
+</div>
+
+<div class="app" id="app">
+  <div class="top">
+    <div class="sign unknown" id="sign">—</div>
+    <div class="road">
+      <div class="road-name" id="roadName">Procurando via…</div>
+      <div class="road-meta" id="roadMeta">limite da via (OpenStreetMap)</div>
+    </div>
+  </div>
+
+  <div class="center">
+    <div>
+      <div class="speed" id="speed">0</div>
+      <div class="unit">km/h</div>
+      <div class="status" id="status">Aguardando sinal do GPS…</div>
+    </div>
+  </div>
+
+  <div class="bottom">
+    <div class="manual">
+      <span class="label" id="manualLabel">Ajustar limite manualmente</span>
+      <button class="small" id="btnMinus" aria-label="Diminuir limite">−</button>
+      <button class="small" id="btnPlus" aria-label="Aumentar limite">+</button>
+      <button class="small" id="btnAuto" aria-label="Voltar ao automático" hidden>Auto</button>
+    </div>
+    <div class="row">
+      <button id="btnSound">🔔 Som: ligado</button>
+      <button id="btnTest">Testar alerta</button>
+    </div>
+    <div class="gps">
+      <span><span class="dot" id="gpsDot"></span><span id="gpsText">GPS</span></span>
+      <span id="accText"></span>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const el = {
+    gate: $('gate'), gateErr: $('gateErr'), btnStart: $('btnStart'),
+    sign: $('sign'), roadName: $('roadName'), roadMeta: $('roadMeta'),
+    speed: $('speed'), status: $('status'),
+    btnMinus: $('btnMinus'), btnPlus: $('btnPlus'), btnAuto: $('btnAuto'), manualLabel: $('manualLabel'),
+    btnSound: $('btnSound'), btnTest: $('btnTest'),
+    gpsDot: $('gpsDot'), gpsText: $('gpsText'), accText: $('accText'),
+  };
+
+  // ---------- Estado ----------
+  const S = {
+    speedKmh: 0,
+    lastPos: null,          // {lat, lon, t}
+    limit: null,            // número ou null
+    limitSource: 'none',    // 'osm' | 'estimated' | 'manual' | 'none'
+    autoLimit: null, autoSource: 'none', autoRoad: '',
+    manualLimit: null,
+    lastQuery: null,        // {lat, lon, t}
+    soundOn: true,
+    state: 'ok',
+    wakeLock: null,
+  };
+  const WARN_MARGIN = 5; // km/h abaixo do limite já fica amarelo
+
+  // Limites padrão (CTB) quando a via não tem maxspeed no OSM — marcados como estimados
+  const DEFAULTS = {
+    motorway: 110, motorway_link: 60,
+    trunk: 80, trunk_link: 60,
+    primary: 60, primary_link: 40,
+    secondary: 50, secondary_link: 40,
+    tertiary: 40, tertiary_link: 40,
+    unclassified: 40, residential: 30, living_street: 30, service: 20,
+  };
+
+  // ---------- Áudio ----------
+  let ctx = null, beepTimer = null;
+  function unlockAudio() {
+    try {
+      ctx = ctx || new (window.AudioContext || window.webkitAudioContext)();
+      if (ctx.state === 'suspended') ctx.resume();
+      // toque silencioso para destravar no iOS
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      g.gain.value = 0.0001; o.connect(g); g.connect(ctx.destination);
+      o.start(); o.stop(ctx.currentTime + 0.05);
+    } catch (e) {}
+  }
+  function beep(freq = 880, dur = 0.18, vol = 0.6) {
+    if (!S.soundOn || !ctx) return;
+    try {
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.type = 'square'; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol, ctx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + dur);
+      o.connect(g); g.connect(ctx.destination);
+      o.start(); o.stop(ctx.currentTime + dur);
+    } catch (e) {}
+  }
+  function startAlarm() {
+    if (beepTimer) return;
+    const fire = () => { beep(1000, 0.16); setTimeout(() => beep(760, 0.16), 220); try { navigator.vibrate && navigator.vibrate([150, 80, 150]); } catch (e) {} };
+    fire();
+    beepTimer = setInterval(fire, 1400);
+  }
+  function stopAlarm() { if (beepTimer) { clearInterval(beepTimer); beepTimer = null; } }
+
+  // ---------- Wake lock ----------
+  async function keepAwake() {
+    try {
+      if ('wakeLock' in navigator) {
+        S.wakeLock = await navigator.wakeLock.request('screen');
+        document.addEventListener('visibilitychange', async () => {
+          if (document.visibilityState === 'visible') { try { S.wakeLock = await navigator.wakeLock.request('screen'); } catch (e) {} }
+        });
+      }
+    } catch (e) {}
+  }
+
+  // ---------- Geometria ----------
+  const R = 6371000;
+  const toRad = d => d * Math.PI / 180;
+  function haversine(a, b) {
+    const dLat = toRad(b.lat - a.lat), dLon = toRad(b.lon - a.lon);
+    const s = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLon / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(s));
+  }
+  // distância ponto→segmento em metros (projeção equiretangular local)
+  function distToSegment(p, a, b) {
+    const kx = Math.cos(toRad(p.lat)) * 111320, ky = 110540;
+    const px = (p.lon - a.lon) * kx, py = (p.lat - a.lat) * ky;
+    const bx = (b.lon - a.lon) * kx, by = (b.lat - a.lat) * ky;
+    const l2 = bx * bx + by * by;
+    let t = l2 ? (px * bx + py * by) / l2 : 0; t = Math.max(0, Math.min(1, t));
+    const dx = px - t * bx, dy = py - t * by;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+
+  // ---------- Overpass (limite da via) ----------
+  const ENDPOINTS = [
+    'https://overpass-api.de/api/interpreter',
+    'https://overpass.kumi.systems/api/interpreter',
+    'https://overpass.private.coffee/api/interpreter',
+  ];
+  let epIndex = 0, querying = false;
+
+  function parseMaxspeed(v) {
+    if (!v) return null;
+    const m = String(v).match(/(\d+(?:\.\d+)?)\s*(mph)?/i);
+    if (!m) return null;
+    let n = parseFloat(m[1]); if (m[2]) n = n * 1.609;
+    return Math.round(n);
+  }
+
+  async function fetchRoad(lat, lon) {
+    const q = `[out:json][timeout:8];way(around:30,${lat},${lon})["highway"~"^(motorway|trunk|primary|secondary|tertiary|unclassified|residential|living_street|service|motorway_link|trunk_link|primary_link|secondary_link|tertiary_link)$"];out tags geom;`;
+    for (let i = 0; i < ENDPOINTS.length; i++) {
+      const url = ENDPOINTS[(epIndex + i) % ENDPOINTS.length];
+      try {
+        const ctrl = new AbortController(); const to = setTimeout(() => ctrl.abort(), 9000);
+        const r = await fetch(url, { method: 'POST', body: 'data=' + encodeURIComponent(q), signal: ctrl.signal,
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
+        clearTimeout(to);
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const j = await r.json();
+        epIndex = (epIndex + i) % ENDPOINTS.length;
+        return j.elements || [];
+      } catch (e) { /* tenta o próximo */ }
+    }
+    throw new Error('overpass');
+  }
+
+  async function updateLimit(pos) {
+    if (querying) return;
+    const now = Date.now();
+    const lq = S.lastQuery;
+    const moved = lq ? haversine(lq, pos) : Infinity;
+    if (lq && now - lq.t < 10000 && moved < 40) return;     // ainda perto, consulta recente
+    if (lq && now - lq.t < 4000) return;                   // respiro mínimo
+    querying = true; S.lastQuery = { lat: pos.lat, lon: pos.lon, t: now };
+    try {
+      const ways = await fetchRoad(pos.lat, pos.lon);
+      let best = null, bestD = Infinity;
+      for (const w of ways) {
+        const g = w.geometry || [];
+        for (let i = 1; i < g.length; i++) {
+          const d = distToSegment(pos, g[i - 1], g[i]);
+          if (d < bestD) { bestD = d; best = w; }
+        }
+      }
+      if (best) {
+        const t = best.tags || {};
+        const ms = parseMaxspeed(t.maxspeed) || parseMaxspeed(t['maxspeed:forward']) || parseMaxspeed(t['maxspeed:backward']);
+        S.autoRoad = t.name || t.ref || ({ motorway: 'Rodovia', trunk: 'Rodovia', primary: 'Via principal', residential: 'Rua residencial', service: 'Via de serviço' }[t.highway] || 'Via sem nome');
+        if (ms) { S.autoLimit = ms; S.autoSource = 'osm'; }
+        else if (DEFAULTS[t.highway]) { S.autoLimit = DEFAULTS[t.highway]; S.autoSource = 'estimated'; }
+        else { S.autoLimit = null; S.autoSource = 'none'; }
+      } else {
+        S.autoRoad = 'Nenhuma via próxima'; S.autoLimit = null; S.autoSource = 'none';
+      }
+      el.roadMeta.textContent = S.autoSource === 'osm' ? 'limite oficial da via (OpenStreetMap)'
+        : S.autoSource === 'estimated' ? 'sem placa no mapa — limite estimado pelo tipo da via'
+        : 'sem dado de limite para esta via';
+    } catch (e) {
+      el.roadMeta.textContent = 'sem conexão com o serviço de mapas — tentando de novo';
+    } finally { querying = false; render(); }
+  }
+
+  // ---------- Render ----------
+  function effectiveLimit() {
+    if (S.manualLimit != null) return { limit: S.manualLimit, source: 'manual' };
+    return { limit: S.autoLimit, source: S.autoSource };
+  }
+  function render() {
+    const { limit, source } = effectiveLimit();
+    el.speed.textContent = Math.round(S.speedKmh);
+    el.roadName.textContent = S.autoRoad || 'Procurando via…';
+
+    el.sign.classList.toggle('estimated', source === 'estimated');
+    el.sign.classList.toggle('unknown', limit == null);
+    el.sign.textContent = limit == null ? '—' : limit;
+    el.manualLabel.textContent = source === 'manual' ? `Limite manual: ${limit} km/h` : 'Ajustar limite manualmente';
+    el.btnAuto.hidden = source !== 'manual';
+
+    let state = 'ok', msg = '';
+    if (limit != null) {
+      if (S.speedKmh > limit) { state = 'danger'; msg = `ACIMA DO LIMITE: +${Math.round(S.speedKmh - limit)} km/h`; }
+      else if (S.speedKmh >= limit - WARN_MARGIN) { state = 'warn'; msg = 'Atenção: perto do limite'; }
+      else msg = `Dentro do limite (${limit} km/h)`;
+    } else {
+      msg = S.lastPos ? 'Sem limite conhecido para esta via' : 'Aguardando sinal do GPS…';
+    }
+    el.status.textContent = msg;
+    if (state !== S.state) {
+      S.state = state;
+      document.body.classList.toggle('state-warn', state === 'warn');
+      document.body.classList.toggle('state-danger', state === 'danger');
+      if (state === 'danger') startAlarm(); else stopAlarm();
+      if (state === 'warn') beep(620, 0.12, 0.35);
+    }
+  }
+
+  // ---------- GPS ----------
+  let speedBuf = [];
+  function onPosition(p) {
+    const c = p.coords;
+    const pos = { lat: c.latitude, lon: c.longitude, t: p.timestamp || Date.now() };
+    let kmh = null;
+    if (c.speed != null && !isNaN(c.speed) && c.speed >= 0) kmh = c.speed * 3.6;
+    else if (S.lastPos) {
+      const dt = (pos.t - S.lastPos.t) / 1000;
+      if (dt > 0.5) kmh = haversine(S.lastPos, pos) / dt * 3.6;
+    }
+    if (kmh != null) {
+      if (c.accuracy > 50 && kmh < 8) kmh = 0; // ruído de GPS parado
+      speedBuf.push(kmh); if (speedBuf.length > 3) speedBuf.shift();
+      S.speedKmh = speedBuf.reduce((a, b) => a + b, 0) / speedBuf.length;
+    }
+    S.lastPos = pos;
+    el.gpsDot.className = 'dot ' + (c.accuracy <= 25 ? 'on' : c.accuracy <= 60 ? '' : 'bad');
+    el.gpsText.textContent = c.accuracy <= 25 ? 'GPS bom' : c.accuracy <= 60 ? 'GPS regular' : 'GPS fraco';
+    el.accText.textContent = `±${Math.round(c.accuracy)} m`;
+    render();
+    updateLimit(pos);
+  }
+  function onError(e) {
+    el.gpsDot.className = 'dot bad';
+    el.gpsText.textContent = e.code === 1 ? 'Localização negada' : 'Sem sinal de GPS';
+    if (e.code === 1) { el.gateErr.hidden = false; el.gateErr.textContent = 'Permissão de localização negada. Libere nas configurações do navegador e recarregue.'; el.gate.hidden = false; }
+  }
+
+  function start() {
+    if (!('geolocation' in navigator)) { el.gateErr.hidden = false; el.gateErr.textContent = 'Este navegador não oferece geolocalização.'; return; }
+    if (!window.isSecureContext) { el.gateErr.hidden = false; el.gateErr.textContent = 'Abra esta página por HTTPS para o GPS funcionar.'; }
+    unlockAudio(); keepAwake();
+    el.gate.hidden = true;
+    navigator.geolocation.watchPosition(onPosition, onError, { enableHighAccuracy: true, maximumAge: 1000, timeout: 15000 });
+  }
+
+  // ---------- Controles ----------
+  el.btnStart.addEventListener('click', start);
+  el.btnMinus.addEventListener('click', () => { const l = effectiveLimit().limit ?? 50; S.manualLimit = Math.max(10, l - 10); render(); });
+  el.btnPlus.addEventListener('click', () => { const l = effectiveLimit().limit ?? 50; S.manualLimit = Math.min(130, l + 10); render(); });
+  el.btnAuto.addEventListener('click', () => { S.manualLimit = null; render(); });
+  el.btnSound.addEventListener('click', () => { S.soundOn = !S.soundOn; el.btnSound.textContent = S.soundOn ? '🔔 Som: ligado' : '🔕 Som: desligado'; if (!S.soundOn) stopAlarm(); else if (S.state === 'danger') startAlarm(); });
+  el.btnTest.addEventListener('click', () => { unlockAudio(); beep(1000, 0.16); setTimeout(() => beep(760, 0.16), 220); try { navigator.vibrate && navigator.vibrate(200); } catch (e) {} });
+
+  render();
+})();
+</script>
+</body>
+</html>
