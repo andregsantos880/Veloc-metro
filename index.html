@@ -163,15 +163,6 @@
   [hidden] { display: none !important; }
 
   /* Modo escuro quando está tudo certo: apaga quase tudo, acende no amarelo/vermelho */
-  body.dim:not(.state-warn):not(.state-danger) { background: #000; }
-  body.dim:not(.state-warn):not(.state-danger) .side,
-  body.dim:not(.state-warn):not(.state-danger) .bar,
-  body.dim:not(.state-warn):not(.state-danger) .gps,
-  body.dim:not(.state-warn):not(.state-danger) .unit,
-  body.dim:not(.state-warn):not(.state-danger) .status { opacity: .18; transition: opacity .4s; }
-  body.dim:not(.state-warn):not(.state-danger) .speed { color: #4a5560; transition: color .4s; }
-  body.dim.peek .side, body.dim.peek .bar, body.dim.peek .gps, body.dim.peek .unit, body.dim.peek .status { opacity: 1 !important; }
-  body.dim.peek .speed { color: var(--fg) !important; }
 
   /* HUD: espelhado para refletir no para-brisa */
   body.hud { background: #000 !important; animation: none !important; }
@@ -206,9 +197,6 @@
     border-radius: 14px; padding: 13px 14px; flex: 1; min-width: 0; outline: none;
   }
   .sheet input[type=text]:focus { border-color: var(--warn); }
-  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
-  .chips button { flex: none; padding: 9px 12px; font-size: 14px; border-radius: 999px; font-weight: 500; }
-  .chips:empty { display: none; }
   .sheet a.btn { display: block; text-align: center; text-decoration: none; flex: 1; }
   .sheet a.btn button { width: 100%; }
   .closer { margin-top: 18px; }
@@ -297,19 +285,7 @@
 <div class="sheet" id="sheetSettings" role="dialog" aria-label="Ajustes">
   <h2>Ajustes</h2>
 
-  <h3>Navegação</h3>
-  <div class="row"><input type="text" id="navDest" placeholder="Endereço ou lugar de destino" autocomplete="off" enterkeyhint="go"></div>
-  <div class="row"><button class="primary" id="btnNavGo">🧭 Abrir no Google Maps</button><button id="btnNavWaze" class="icon" title="Abrir no Waze">W</button></div>
-  <div class="chips" id="navChips"></div>
-  <div class="hint">Abre o app de mapas já com a rota. Enquanto ele estiver na frente, o Velocímetro fica pausado — no iPhone, páginas em segundo plano não recebem GPS.</div>
-
   <h3>Som do alerta</h3>
-  <div class="seg" role="group" aria-label="Tipo de alerta">
-    <button data-sound="sirene">Sirene</button>
-    <button data-sound="bipe">Bipe</button>
-    <button data-sound="buzina">Buzina</button>
-    <button id="btnTest">Testar</button>
-  </div>
   <div class="row"><button class="toggle" id="btnSoundOn">🔔 Som do alerta: ligado</button></div>
   <div class="hint">Na tela principal, um toque no 🔔 silencia por 1 minuto; segurar liga/desliga o som.</div>
 
@@ -330,12 +306,6 @@
   </div>
 
   <h3>Tela</h3>
-  <div class="seg" role="group" aria-label="Escurecer quando OK">
-    <button data-dim="off">Normal</button>
-    <button data-dim="on">Escurecer quando OK</button>
-    <button data-dim="night">Escurecer à noite</button>
-  </div>
-  <div class="hint" id="nightInfo">"À noite" usa o pôr e o nascer do sol da sua posição.</div>
   <div class="row"><button id="btnHud">🪞 Modo HUD (espelhado no para-brisa)</button></div>
 
   <h3>Avisos</h3>
@@ -345,10 +315,7 @@
 
   <h3>Mapa offline</h3>
   <div class="row"><button id="btnDlHere">⬇️ Baixar 4 km ao redor daqui</button></div>
-  <div class="row"><button id="btnSaveHome">📍 Salvar aqui como Casa</button><button id="btnSaveWork">📍 Salvar aqui como Trabalho</button></div>
-  <div class="row"><button id="btnDlHome" hidden>⬇️ Baixar Casa</button><button id="btnDlWork" hidden>⬇️ Baixar Trabalho</button></div>
   <div class="hint" id="dlStatus"></div>
-  <div class="row"><button id="btnRefreshMap">🔄 Recarregar mapa desta área</button></div>
   <div class="hint" id="mapInfo"></div>
 
   <h3>App e correções</h3>

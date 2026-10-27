@@ -10,15 +10,12 @@
     speed: $('speed'), status: $('status'),
     btnMinus: $('btnMinus'), btnPlus: $('btnPlus'), btnAuto: $('btnAuto'),
     btnSound: $('btnSound'), btnSoundOn: $('btnSoundOn'), btnVoice: $('btnVoice'), btnVoice2: $('btnVoice2'), btnStats: $('btnStats'), btnSettings: $('btnSettings'),
-    btnTest: $('btnTest'), btnRadar: $('btnRadar'), btnAhead: $('btnAhead'), btnHud: $('btnHud'), btnHudExit: $('btnHudExit'), nightInfo: $('nightInfo'),
-    navDest: $('navDest'), btnNavGo: $('btnNavGo'), btnNavWaze: $('btnNavWaze'), navChips: $('navChips'),
-    btnDlHere: $('btnDlHere'), btnSaveHome: $('btnSaveHome'), btnSaveWork: $('btnSaveWork'), btnDlHome: $('btnDlHome'), btnDlWork: $('btnDlWork'), dlStatus: $('dlStatus'),
-    btnInstall: $('btnInstall'), installHint: $('installHint'), btnRefreshMap: $('btnRefreshMap'), lnkOsm: $('lnkOsm'), mapInfo: $('mapInfo'),
+    btnRadar: $('btnRadar'), btnAhead: $('btnAhead'), btnHud: $('btnHud'), btnHudExit: $('btnHudExit'),
+    btnDlHere: $('btnDlHere'), dlStatus: $('dlStatus'),
+    btnInstall: $('btnInstall'), installHint: $('installHint'), lnkOsm: $('lnkOsm'), mapInfo: $('mapInfo'),
     btnClearFixes: $('btnClearFixes'), fixInfo: $('fixInfo'),
-    sndBtns: Array.from(document.querySelectorAll('[data-sound]')),
     tolBtns: Array.from(document.querySelectorAll('[data-tol]')),
     warnBtns: Array.from(document.querySelectorAll('[data-warn]')),
-    dimBtns: Array.from(document.querySelectorAll('[data-dim]')),
     gpsDot: $('gpsDot'), gpsText: $('gpsText'), accText: $('accText'), tripMini: $('tripMini'),
     scrim: $('scrim'), sheetSettings: $('sheetSettings'), sheetStats: $('sheetStats'),
     btnCloseSettings: $('btnCloseSettings'), btnCloseStats: $('btnCloseStats'), btnResetTrip: $('btnResetTrip'),
@@ -36,16 +33,14 @@
     stale: false,
     autoLimit: null, autoSource: 'none', autoRoad: '', autoWayId: null, autoCond: false,
     manualLimit: null,      // limite temporário quando não há via identificada
-    soundOn: true, soundType: 'sirene', voiceOn: true, radarOn: true, aheadOn: true,
-    dimMode: 'off',         // 'off' | 'on' | 'night'
-    dim: false, hud: false,
+    soundOn: true, voiceOn: true, radarOn: true, aheadOn: true,
+    hud: false,
     tolMode: 'none',        // 'none' | 'br' | 'k5' | 'p10'
     warnMargin: 5,
     muteUntil: 0,
     state: 'ok',
     wakeLock: null,
     lastAnnouncedLimit: null,
-    places: {},             // {casa:{lat,lon}, trabalho:{lat,lon}}
   };
 
   // Limites padrão (CTB) quando a via não tem maxspeed no OSM — marcados como estimados
@@ -104,52 +99,15 @@
       o.start(); o.stop(ctx.currentTime + dur);
     } catch (e) {}
   }
-  function siren(dur = 0.55) {
-    if (!canSound()) return;
-    try {
-      const t = ctx.currentTime, g = ctx.createGain();
-      g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(1.0, t + 0.03);
-      g.gain.setValueAtTime(1.0, t + dur - 0.05);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-      g.connect(out());
-      for (const [type, f0, f1] of [['sawtooth', 700, 1500], ['square', 1400, 3000]]) {
-        const o = ctx.createOscillator(); o.type = type;
-        o.frequency.setValueAtTime(f0, t);
-        o.frequency.exponentialRampToValueAtTime(f1, t + dur * 0.5);
-        o.frequency.exponentialRampToValueAtTime(f0, t + dur);
-        o.connect(g); o.start(t); o.stop(t + dur);
-      }
-    } catch (e) {}
-  }
-  function horn(dur = 0.6) {
-    if (!canSound()) return;
-    try {
-      const t = ctx.currentTime, g = ctx.createGain();
-      g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(1.0, t + 0.02);
-      g.gain.setValueAtTime(1.0, t + dur - 0.08);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-      g.connect(out());
-      for (const [type, f] of [['sawtooth', 220], ['sawtooth', 277], ['square', 440]]) {
-        const o = ctx.createOscillator(); o.type = type; o.frequency.value = f;
-        o.connect(g); o.start(t); o.stop(t + dur);
-      }
-    } catch (e) {}
-  }
   function beeps() {
     beep(1400, 0.12, 1.0); setTimeout(() => beep(1400, 0.12, 1.0), 160); setTimeout(() => beep(1400, 0.12, 1.0), 320);
   }
-  const SOUNDS = {
-    sirene: { play: () => siren(0.55), every: 700 },
-    bipe:   { play: beeps,              every: 900 },
-    buzina: { play: () => horn(0.6),    every: 1000 },
-  };
-  function playAlert() { (SOUNDS[S.soundType] || SOUNDS.sirene).play(); if (!muted()) { try { navigator.vibrate && navigator.vibrate([250, 100, 250]); } catch (e) {} } }
+  const ALERT_EVERY = 900; // ms entre repetições do bipe enquanto estiver acima do limite
+  function playAlert() { beeps(); if (!muted()) { try { navigator.vibrate && navigator.vibrate([250, 100, 250]); } catch (e) {} } }
   function startAlarm() {
     if (beepTimer) return;
     playAlert();
-    beepTimer = setInterval(playAlert, (SOUNDS[S.soundType] || SOUNDS.sirene).every);
+    beepTimer = setInterval(playAlert, ALERT_EVERY);
   }
   function stopAlarm() { if (beepTimer) { clearInterval(beepTimer); beepTimer = null; } }
   function chime() { beep(1046, 0.12, 0.9); setTimeout(() => beep(1318, 0.16, 0.9), 140); if (!muted()) { try { navigator.vibrate && navigator.vibrate(120); } catch (e) {} } }
@@ -213,39 +171,6 @@
     return { d: Math.sqrt(dx * dx + dy * dy), t, len: Math.sqrt(l2) };
   }
   const P = g => ({ lat: g[0], lon: g[1] });
-
-  // ---------- Sol (para o escurecer automático à noite) ----------
-  function sunTimes(lat, lon, date = new Date()) {
-    // Algoritmo NOAA simplificado; retorna {rise, set} em Date (hoje, hora local). Null perto dos polos.
-    const rad = Math.PI / 180;
-    const dayMs = 86400000;
-    const J1970 = 2440588, J2000 = 2451545;
-    const toJulian = d => d.valueOf() / dayMs - 0.5 + J1970;
-    const fromJulian = j => new Date((j + 0.5 - J1970) * dayMs);
-    const d = toJulian(date) - J2000;
-    const lw = rad * -lon, phi = rad * lat;
-    const n = Math.round(d - 0.0009 - lw / (2 * Math.PI));
-    const ds = 0.0009 + lw / (2 * Math.PI) + n;
-    const M = rad * (357.5291 + 0.98560028 * ds);
-    const C = rad * (1.9148 * Math.sin(M) + 0.02 * Math.sin(2 * M) + 0.0003 * Math.sin(3 * M));
-    const L = M + C + rad * 102.9372 + Math.PI;
-    const Jtransit = J2000 + ds + 0.0053 * Math.sin(M) - 0.0069 * Math.sin(2 * L);
-    const dec = Math.asin(Math.sin(L) * Math.sin(rad * 23.4397));
-    const h = rad * -0.833;
-    const cosw = (Math.sin(h) - Math.sin(phi) * Math.sin(dec)) / (Math.cos(phi) * Math.cos(dec));
-    if (cosw < -1 || cosw > 1) return null;
-    const w = Math.acos(cosw);
-    const Jset = J2000 + 0.0009 + (w + lw) / (2 * Math.PI) + n + 0.0053 * Math.sin(M) - 0.0069 * Math.sin(2 * L);
-    const Jrise = Jtransit - (Jset - Jtransit);
-    return { rise: fromJulian(Jrise), set: fromJulian(Jset) };
-  }
-  function isNight(pos) {
-    if (!pos) { const h = new Date().getHours(); return h >= 18 || h < 6; }
-    const st = sunTimes(pos.lat, pos.lon);
-    if (!st) return false;
-    const now = Date.now();
-    return now < st.rise.valueOf() - 15 * 60000 || now > st.set.valueOf() + 15 * 60000;
-  }
 
   // ---------- Banco local (IndexedDB) para áreas do mapa e trajetos ----------
   const DB = {
@@ -1002,13 +927,11 @@
     if (e.code === 1) { el.gateErr.hidden = false; el.gateErr.textContent = 'Permissão de localização negada. Libere nas configurações do navegador e recarregue.'; el.gate.hidden = false; }
   }
   // Relógio de 1 s: sinal parado, contagem do silêncio, escurecer à noite
-  let lastNightCheck = 0;
   setInterval(() => {
     watchdog();
     if (S.lastFix && !S.stale && Date.now() - S.lastFix > 6000) { S.stale = true; render(); }
     if (T.overSince) renderTrip();
     if (S.muteUntil) { renderMute(); if (!muted()) { S.muteUntil = 0; if (S.state === 'danger') { stopAlarm(); startAlarm(); } render(); } }
-    if (Date.now() - lastNightCheck > 60000) { lastNightCheck = Date.now(); applyDim(); }
   }, 1000);
 
   function start() {
@@ -1020,7 +943,7 @@
   }
 
   // ---------- Painéis ----------
-  function openSheet(sh) { el.scrim.hidden = false; sh.classList.add('open'); if (sh === el.sheetStats) renderTrip(); if (sh === el.sheetSettings) { renderMapInfo(); renderFixInfo(); renderPlaces(); } }
+  function openSheet(sh) { el.scrim.hidden = false; sh.classList.add('open'); if (sh === el.sheetStats) renderTrip(); if (sh === el.sheetSettings) { renderMapInfo(); renderFixInfo(); } }
   function closeSheets() { el.scrim.hidden = true; el.sheetSettings.classList.remove('open'); el.sheetStats.classList.remove('open'); }
   function renderMapInfo() {
     const n = areaIdx.length;
@@ -1031,13 +954,6 @@
     el.mapInfo.textContent = areaTxt + cov + `${n} área${n === 1 ? '' : 's'} do Overpass guardada${n === 1 ? '' : 's'} no celular. Radares oficiais carregados: ${radarCount}.` + (lastErr ? ` Último erro do mapa: ${lastErr}` : '');
   }
   function renderFixInfo() { const n = Object.keys(fixes).length; el.fixInfo.textContent = n ? `${n} via${n === 1 ? '' : 's'} com limite corrigido por você.` : 'Use − e + na tela principal: a correção fica salva para a via em que você está.'; }
-  function renderPlaces() {
-    el.btnDlHome.hidden = !S.places.casa; el.btnDlWork.hidden = !S.places.trabalho;
-    el.btnSaveHome.textContent = S.places.casa ? '📍 Casa salva (tocar para trocar)' : '📍 Salvar aqui como Casa';
-    el.btnSaveWork.textContent = S.places.trabalho ? '📍 Trabalho salvo (tocar para trocar)' : '📍 Salvar aqui como Trabalho';
-    renderNavChips();
-    if (S.lastPos) { const st = sunTimes(S.lastPos.lat, S.lastPos.lon); if (st) el.nightInfo.textContent = `Hoje: nasce ${st.rise.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}, põe ${st.set.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}.`; }
-  }
   el.btnSettings.addEventListener('click', () => openSheet(el.sheetSettings));
   el.btnStats.addEventListener('click', () => openSheet(el.sheetStats));
   el.btnCloseSettings.addEventListener('click', closeSheets);
@@ -1047,56 +963,8 @@
   el.btnMapCur.addEventListener('click', () => openMap(T.start, 'Viagem atual'));
   el.btnGpxCur.addEventListener('click', () => exportTrip(T.start, 'gpx'));
   el.btnCsvCur.addEventListener('click', () => exportTrip(T.start, 'csv'));
-  el.btnRefreshMap.addEventListener('click', async () => {
-    if (!S.lastPos) return;
-    closeSheets();
-    if (inTiles(S.lastPos)) { tileMem.clear(); try { await caches.delete(TILES.cacheName); } catch (e) {} if (area && area.k.startsWith('t:')) { prevArea = area; area = null; } TILES.failedAt = 0; ensureTiles(S.lastPos); return; }
-    areaFails = 0; quickFails = 0; lastFetchFail = 0; ensureArea(S.lastPos, { force: true });
-  });
   el.btnClearFixes.addEventListener('click', () => { if (confirm('Apagar todas as suas correções de limite?')) { fixes = {}; saveFixes(); renderFixInfo(); if (S.lastPos) updateLimit(S.lastPos); render(); } });
   el.btnDlHere.addEventListener('click', () => { if (S.lastPos) downloadAround(S.lastPos, 'aqui'); else el.dlStatus.textContent = 'Ainda sem posição do GPS.'; });
-  // ---------- Navegação: abre o Google Maps (ou Waze) já com a rota ----------
-  let navRecent = [];
-  try { navRecent = JSON.parse(localStorage.getItem('velocimetro-nav') || '[]'); } catch (e) { navRecent = []; }
-  function navTarget() {
-    const v = el.navDest.value.trim();
-    if (v) return { q: v, label: v };
-    return null;
-  }
-  function navOpen(app, target) {
-    if (!target) { el.navDest.focus(); return; }
-    const dest = target.lat != null ? `${target.lat.toFixed(6)},${target.lon.toFixed(6)}` : target.q;
-    let url;
-    if (app === 'waze') url = target.lat != null ? `https://waze.com/ul?ll=${dest}&navigate=yes` : `https://waze.com/ul?q=${encodeURIComponent(dest)}&navigate=yes`;
-    else url = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(dest)}&travelmode=driving&dir_action=navigate`;
-    if (target.q) {
-      navRecent = [target.q, ...navRecent.filter(x => x !== target.q)].slice(0, 6);
-      try { localStorage.setItem('velocimetro-nav', JSON.stringify(navRecent)); } catch (e) {}
-      renderNavChips();
-    }
-    window.open(url, '_blank', 'noopener');
-  }
-  function renderNavChips() {
-    const chips = [];
-    if (S.places.casa) chips.push({ t: '🏠 Casa', go: { lat: S.places.casa.lat, lon: S.places.casa.lon } });
-    if (S.places.trabalho) chips.push({ t: '💼 Trabalho', go: { lat: S.places.trabalho.lat, lon: S.places.trabalho.lon } });
-    for (const q of navRecent) chips.push({ t: q.length > 28 ? q.slice(0, 27) + '…' : q, go: { q } });
-    el.navChips.replaceChildren(...chips.map(c => {
-      const b = document.createElement('button'); b.type = 'button'; b.textContent = c.t;
-      b.addEventListener('click', () => { if (c.go.q) el.navDest.value = c.go.q; navOpen('google', c.go); });
-      return b;
-    }));
-  }
-  el.btnNavGo.addEventListener('click', () => navOpen('google', navTarget()));
-  el.btnNavWaze.addEventListener('click', () => navOpen('waze', navTarget()));
-  el.navDest.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); el.navDest.blur(); navOpen('google', navTarget()); } });
-  renderNavChips();
-
-  el.btnSaveHome.addEventListener('click', () => { if (S.lastPos) { S.places.casa = { lat: S.lastPos.lat, lon: S.lastPos.lon }; savePrefs(); renderPlaces(); } });
-  el.btnSaveWork.addEventListener('click', () => { if (S.lastPos) { S.places.trabalho = { lat: S.lastPos.lat, lon: S.lastPos.lon }; savePrefs(); renderPlaces(); } });
-  el.btnDlHome.addEventListener('click', () => S.places.casa && downloadAround(S.places.casa, 'Casa'));
-  el.btnDlWork.addEventListener('click', () => S.places.trabalho && downloadAround(S.places.trabalho, 'Trabalho'));
-
   // ---------- Controles ----------
   el.btnStart.addEventListener('click', start);
   function adjust(delta) {
@@ -1127,44 +995,27 @@
   const toggleVoice = () => { S.voiceOn = !S.voiceOn; savePrefs(); renderPrefs(); if (S.voiceOn) say('Avisos por voz ligados'); else { try { speechSynthesis.cancel(); } catch (e) {} } };
   el.btnVoice.addEventListener('click', toggleVoice);
   el.btnVoice2.addEventListener('click', toggleVoice);
-  el.btnTest.addEventListener('click', () => { unlockAudio(); S.muteUntil = 0; playAlert(); setTimeout(playAlert, (SOUNDS[S.soundType] || SOUNDS.sirene).every); });
-  // No modo escuro, um toque na tela mostra tudo por alguns segundos
-  let peekTimer = null;
-  document.getElementById('app').addEventListener('pointerdown', () => {
-    if (!S.dim) return;
-    document.body.classList.add('peek'); clearTimeout(peekTimer);
-    peekTimer = setTimeout(() => document.body.classList.remove('peek'), 4000);
-  });
   // HUD
   function setHud(on) { S.hud = on; document.body.classList.toggle('hud', on); el.btnHudExit.hidden = !on; if (on) closeSheets(); }
   el.btnHud.addEventListener('click', () => setHud(true));
   el.btnHudExit.addEventListener('click', () => setHud(false));
 
   // ---------- Preferências (ficam salvas no celular) ----------
-  function applyDim() {
-    S.dim = S.dimMode === 'on' || (S.dimMode === 'night' && isNight(S.lastPos));
-    document.body.classList.toggle('dim', S.dim);
-  }
   function loadPrefs() {
     try {
       const p = JSON.parse(localStorage.getItem('velocimetro-prefs') || '{}');
-      if (SOUNDS[p.soundType]) S.soundType = p.soundType;
-      if (['off', 'on', 'night'].includes(p.dimMode)) S.dimMode = p.dimMode; else if (p.dim) S.dimMode = 'on';
       if (p.soundOn != null) S.soundOn = !!p.soundOn;
       if (p.voiceOn != null) S.voiceOn = !!p.voiceOn;
       if (p.radarOn != null) S.radarOn = !!p.radarOn;
       if (p.aheadOn != null) S.aheadOn = !!p.aheadOn;
       if (['none', 'br', 'k5', 'p10'].includes(p.tolMode)) S.tolMode = p.tolMode;
       if ([3, 5, 10].includes(p.warnMargin)) S.warnMargin = p.warnMargin;
-      if (p.places && typeof p.places === 'object') S.places = p.places;
     } catch (e) {}
   }
-  function savePrefs() { try { localStorage.setItem('velocimetro-prefs', JSON.stringify({ soundType: S.soundType, dimMode: S.dimMode, soundOn: S.soundOn, voiceOn: S.voiceOn, radarOn: S.radarOn, aheadOn: S.aheadOn, tolMode: S.tolMode, warnMargin: S.warnMargin, places: S.places })); } catch (e) {} }
+  function savePrefs() { try { localStorage.setItem('velocimetro-prefs', JSON.stringify({ soundOn: S.soundOn, voiceOn: S.voiceOn, radarOn: S.radarOn, aheadOn: S.aheadOn, tolMode: S.tolMode, warnMargin: S.warnMargin })); } catch (e) {} }
   function renderPrefs() {
-    el.sndBtns.forEach(b => b.classList.toggle('on', b.dataset.sound === S.soundType));
     el.tolBtns.forEach(b => b.classList.toggle('on', b.dataset.tol === S.tolMode));
     el.warnBtns.forEach(b => b.classList.toggle('on', +b.dataset.warn === S.warnMargin));
-    el.dimBtns.forEach(b => b.classList.toggle('on', b.dataset.dim === S.dimMode));
     el.btnRadar.classList.toggle('on', S.radarOn);
     el.btnRadar.textContent = S.radarOn ? '📷 Radares e lombadas: ligado' : '📷 Avisar radares e lombadas';
     el.btnAhead.classList.toggle('on', S.aheadOn);
@@ -1175,18 +1026,11 @@
     el.btnSoundOn.textContent = S.soundOn ? '🔔 Som do alerta: ligado' : '🔕 Som do alerta: desligado';
     el.btnVoice.classList.toggle('off', !S.voiceOn);
     renderMute();
-    applyDim();
     if (!S.radarOn) { hazard = null; el.banner.hidden = true; }
     if (!S.aheadOn) { aheadInfo = null; el.ahead.hidden = true; }
   }
-  el.sndBtns.forEach(b => b.addEventListener('click', () => {
-    S.soundType = b.dataset.sound; savePrefs(); renderPrefs();
-    unlockAudio(); playAlert();
-    if (beepTimer) { stopAlarm(); startAlarm(); }
-  }));
   el.tolBtns.forEach(b => b.addEventListener('click', () => { S.tolMode = b.dataset.tol; savePrefs(); renderPrefs(); render(); }));
   el.warnBtns.forEach(b => b.addEventListener('click', () => { S.warnMargin = +b.dataset.warn; savePrefs(); renderPrefs(); render(); }));
-  el.dimBtns.forEach(b => b.addEventListener('click', () => { S.dimMode = b.dataset.dim; savePrefs(); renderPrefs(); }));
   el.btnRadar.addEventListener('click', () => { S.radarOn = !S.radarOn; savePrefs(); renderPrefs(); });
   el.btnAhead.addEventListener('click', () => { S.aheadOn = !S.aheadOn; savePrefs(); renderPrefs(); });
   loadPrefs(); loadFixes(); renderPrefs(); loadTrip(); renderTrip();
