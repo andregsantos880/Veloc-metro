@@ -1,5 +1,5 @@
 // Service worker: deixa o app abrir sem internet e atualiza sozinho quando há versão nova.
-const VERSION = 'velocimetro-v10';
+const VERSION = 'velocimetro-v11';
 const TILES = 'velocimetro-tiles';   // blocos do mapa local (tiles/sp); o app apaga este cache quando o mapa é regerado
 const SHELL = ['./', './index.html', './app.js', './manifest.json', './radares-sp.json', './icon.svg', './icon-192.png', './icon-512.png'];
 

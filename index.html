@@ -71,11 +71,13 @@
     font-family: var(--font-num); font-weight: 700; font-size: 38px; color: #111;
     font-variant-numeric: tabular-nums;
     box-shadow: 0 2px 12px rgba(0,0,0,.4);
+    position: relative;
   }
   .sign.estimated { border-style: dashed; border-width: 6px; }
   .sign.manual, .sign.fixed { border-color: #2b7de9; }
   .sign.conditional { box-shadow: 0 0 0 4px rgba(245,197,24,.55), 0 2px 12px rgba(0,0,0,.4); }
   .sign.unknown { color: #999; font-size: 30px; }
+  .sign.heavy::after { content: "🚚"; position: absolute; right: -6px; bottom: -8px; font-size: 22px; line-height: 1; filter: drop-shadow(0 1px 2px rgba(0,0,0,.6)); }
   .road { min-width: 0; flex: 1; }
   .road-name {
     font-weight: 600; font-size: 20px; line-height: 1.15;
@@ -284,6 +286,13 @@
 
 <div class="sheet" id="sheetSettings" role="dialog" aria-label="Ajustes">
   <h2>Ajustes</h2>
+
+  <h3>Veículo</h3>
+  <div class="seg" role="group" aria-label="Porte do veículo">
+    <button data-veh="car">🚗 Pequeno porte</button>
+    <button data-veh="truck">🚚 Grande porte</button>
+  </div>
+  <div class="hint">Grande porte = caminhão, ônibus, carreta. Em rodovia usa a placa própria para pesados quando o mapa tem; sem ela, aplica 80 km/h (CTB) onde o limite de carro é maior. Na cidade o limite é o mesmo para todos.</div>
 
   <h3>Som do alerta</h3>
   <div class="row"><button class="toggle" id="btnSoundOn">🔔 Som do alerta: ligado</button></div>

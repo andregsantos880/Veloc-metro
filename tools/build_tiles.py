@@ -6,7 +6,7 @@ Entrada : um arquivo .osm.pbf já recortado na região de interesse (ex.: Grande
 Saída   : tiles/sp/<ty>_<tx>.json  (um por bloco de 0,02° ≈ 2 km) + tiles/sp/index.json
 
 Cada bloco usa exatamente o formato que o app monta a partir do Overpass (função compact() do app.js):
-  ways : [{i, h, n, m, f, b, c?, o, g:[[lat,lon],...]}]
+  ways : [{i, h, n, m, f, b, c?, t?, o, g:[[lat,lon],...]}]   (t = maxspeed:hgv, limite para veículos pesados)
   nodes: [{i, k:'cam'|'calm', lat, lon, m, n}]
 
 Uso: python3 tools/build_tiles.py recorte.osm.pbf tiles/sp
@@ -92,6 +92,9 @@ class Handler(osmium.SimpleHandler):
         }
         if t.get('maxspeed:conditional'):
             rec['c'] = t.get('maxspeed:conditional')
+        hgv = parse_maxspeed(t.get('maxspeed:hgv')) or parse_maxspeed(t.get('maxspeed:hgv:forward')) or parse_maxspeed(t.get('maxspeed:bus'))
+        if hgv:
+            rec['t'] = hgv
         # Em quais blocos a via entra: os dos seus pontos e os que cada segmento atravessa
         keys = set()
         for i, p in enumerate(g):

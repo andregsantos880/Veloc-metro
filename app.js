@@ -14,6 +14,7 @@
     btnDlHere: $('btnDlHere'), dlStatus: $('dlStatus'),
     btnInstall: $('btnInstall'), installHint: $('installHint'), lnkOsm: $('lnkOsm'), mapInfo: $('mapInfo'),
     btnClearFixes: $('btnClearFixes'), fixInfo: $('fixInfo'),
+    vehBtns: Array.from(document.querySelectorAll('[data-veh]')),
     tolBtns: Array.from(document.querySelectorAll('[data-tol]')),
     warnBtns: Array.from(document.querySelectorAll('[data-warn]')),
     gpsDot: $('gpsDot'), gpsText: $('gpsText'), accText: $('accText'), tripMini: $('tripMini'),
@@ -34,6 +35,7 @@
     autoLimit: null, autoSource: 'none', autoRoad: '', autoWayId: null, autoCond: false,
     manualLimit: null,      // limite temporário quando não há via identificada
     soundOn: true, voiceOn: true, radarOn: true, aheadOn: true,
+    vehicle: 'car',         // 'car' (pequeno porte) | 'truck' (grande porte: caminhão/ônibus)
     hud: false,
     tolMode: 'none',        // 'none' | 'br' | 'k5' | 'p10'
     warnMargin: 5,
@@ -52,6 +54,10 @@
     tertiary: 40, tertiary_link: 40,
     unclassified: 40, residential: 30, living_street: 30, service: 20,
   };
+  // Grande porte (CTB art. 61): em rodovia sem placa própria, caminhões ficam em 80 km/h.
+  // Em via urbana o limite é o mesmo para todos os veículos.
+  const HEAVY_ROAD = new Set(['motorway', 'motorway_link', 'trunk', 'trunk_link', 'primary', 'primary_link']);
+  const HEAVY_CAP = 80;
   const HW_NAMES = { motorway: 'Rodovia', trunk: 'Rodovia', primary: 'Via principal', secondary: 'Via secundária', tertiary: 'Via coletora', residential: 'Rua residencial', living_street: 'Rua residencial', service: 'Via de serviço', unclassified: 'Via sem nome' };
 
   function toleranceFor(limit) {
@@ -244,6 +250,8 @@
           o: ow, g: e.geometry.map(p => [+p.lat.toFixed(5), +p.lon.toFixed(5)]),
         };
         if (t['maxspeed:conditional']) w.c = t['maxspeed:conditional'];
+        const hgv = parseMaxspeed(t['maxspeed:hgv']) || parseMaxspeed(t['maxspeed:hgv:forward']) || parseMaxspeed(t['maxspeed:bus']);
+        if (hgv) w.t = hgv;
         ways.push(w);
       } else if (e.type === 'node' && e.lat != null) {
         const k = t.highway === 'speed_camera' ? 'cam' : t.traffic_calming ? 'calm' : null;
@@ -537,14 +545,23 @@
   // Limite de uma via para quem passa nela num certo sentido (diff = ângulo entre meu rumo e o desenho da via)
   function wayLimit(w, diff) {
     if (fixes[w.i]) return { limit: fixes[w.i], source: 'fixed', cond: false };
+    const heavy = S.vehicle === 'truck';
+    // Placa própria para pesados no mapa: vale sempre
+    if (heavy && w.t) return { limit: w.t, source: 'osm', cond: false, heavy: true };
     const cl = conditionalLimit(w.c);
-    if (cl) return { limit: cl, source: 'osm', cond: true };
+    if (cl) return heavyAdjust(w, { limit: cl, source: 'osm', cond: true });
     let ms = w.m;
     if (diff != null) ms = (diff < 90 ? (w.f ?? w.m) : (w.b ?? w.m));
     if (!ms) ms = w.m || w.f || w.b;
-    if (ms) return { limit: ms, source: 'osm', cond: false };
-    if (DEFAULTS[w.h]) return { limit: DEFAULTS[w.h], source: 'estimated', cond: false };
+    if (ms) return heavyAdjust(w, { limit: ms, source: 'osm', cond: false });
+    if (DEFAULTS[w.h]) return heavyAdjust(w, { limit: DEFAULTS[w.h], source: 'estimated', cond: false });
     return { limit: null, source: 'none', cond: false };
+  }
+  // Grande porte sem placa própria: em rodovia, o limite de carro acima de 80 vira 80 (CTB); na cidade fica igual.
+  function heavyAdjust(w, L) {
+    if (S.vehicle !== 'truck' || L.limit == null) return L;
+    if (HEAVY_ROAD.has(w.h) && L.limit > HEAVY_CAP) return { limit: HEAVY_CAP, source: 'estimated', cond: false, heavy: true, carLimit: L.limit };
+    return L;
   }
 
   // ---------- Qual via estou? (distância + rumo) ----------
@@ -579,14 +596,14 @@
     const m = matchWay(pos);
     lastMatch = m;
     if (!m) {
-      if (area) { S.autoRoad = 'Nenhuma via próxima'; S.autoLimit = null; S.autoSource = 'none'; S.autoWayId = null; S.autoCond = false; }
+      if (area) { S.autoRoad = 'Nenhuma via próxima'; S.autoLimit = null; S.autoSource = 'none'; S.autoWayId = null; S.autoCond = false; S.autoHeavy = false; S.autoCarLimit = null; }
       return;
     }
     const w = m.w;
     S.autoWayId = w.i;
     S.autoRoad = w.n || HW_NAMES[w.h] || 'Via sem nome';
     const L = wayLimit(w, m.diff);
-    S.autoLimit = L.limit; S.autoSource = L.source; S.autoCond = L.cond;
+    S.autoLimit = L.limit; S.autoSource = L.source; S.autoCond = L.cond; S.autoHeavy = !!L.heavy; S.autoCarLimit = L.carLimit || null;
   }
 
   // ---------- O limite vai mudar à frente? ----------
@@ -816,12 +833,15 @@
     el.sign.textContent = limit == null ? '—' : limit;
     el.btnAuto.hidden = !(source === 'manual' || source === 'fixed');
 
+    const heavy = S.vehicle === 'truck' && source !== 'manual' && source !== 'fixed';
     const srcTxt = source === 'manual' ? 'limite definido por você'
       : source === 'fixed' ? 'limite corrigido por você (fica salvo para esta via)'
-      : source === 'osm' ? (cond ? 'limite por horário (OpenStreetMap)' : 'limite oficial (OpenStreetMap)')
-      : source === 'estimated' ? 'sem placa no mapa — estimado pelo tipo da via'
+      : source === 'osm' ? (heavy && S.autoHeavy ? 'limite para pesados (OpenStreetMap)' : cond ? 'limite por horário (OpenStreetMap)' : 'limite oficial (OpenStreetMap)')
+      : source === 'estimated' ? (heavy && S.autoHeavy ? `grande porte: ${HEAVY_CAP} em rodovia (carros ${S.autoCarLimit})` : 'sem placa no mapa — estimado pelo tipo da via')
       : area ? 'sem dado de limite para esta via' : '';
-    el.roadMeta.textContent = [srcTxt, mapStatus].filter(Boolean).join(' · ');
+    const vehTxt = S.vehicle === 'truck' ? '🚚 grande porte' : '';
+    el.roadMeta.textContent = [vehTxt, srcTxt, mapStatus].filter(Boolean).join(' · ');
+    el.sign.classList.toggle('heavy', S.vehicle === 'truck');
 
     // Aviso de voz quando o limite da via muda
     if (source !== 'manual' && limit != null && limit !== S.lastAnnouncedLimit && S.lastPos && !S.stale) {
@@ -1005,6 +1025,7 @@
     try {
       const p = JSON.parse(localStorage.getItem('velocimetro-prefs') || '{}');
       if (p.soundOn != null) S.soundOn = !!p.soundOn;
+      if (p.vehicle === 'car' || p.vehicle === 'truck') S.vehicle = p.vehicle;
       if (p.voiceOn != null) S.voiceOn = !!p.voiceOn;
       if (p.radarOn != null) S.radarOn = !!p.radarOn;
       if (p.aheadOn != null) S.aheadOn = !!p.aheadOn;
@@ -1012,8 +1033,9 @@
       if ([3, 5, 10].includes(p.warnMargin)) S.warnMargin = p.warnMargin;
     } catch (e) {}
   }
-  function savePrefs() { try { localStorage.setItem('velocimetro-prefs', JSON.stringify({ soundOn: S.soundOn, voiceOn: S.voiceOn, radarOn: S.radarOn, aheadOn: S.aheadOn, tolMode: S.tolMode, warnMargin: S.warnMargin })); } catch (e) {} }
+  function savePrefs() { try { localStorage.setItem('velocimetro-prefs', JSON.stringify({ vehicle: S.vehicle, soundOn: S.soundOn, voiceOn: S.voiceOn, radarOn: S.radarOn, aheadOn: S.aheadOn, tolMode: S.tolMode, warnMargin: S.warnMargin })); } catch (e) {} }
   function renderPrefs() {
+    el.vehBtns.forEach(b => b.classList.toggle('on', b.dataset.veh === S.vehicle));
     el.tolBtns.forEach(b => b.classList.toggle('on', b.dataset.tol === S.tolMode));
     el.warnBtns.forEach(b => b.classList.toggle('on', +b.dataset.warn === S.warnMargin));
     el.btnRadar.classList.toggle('on', S.radarOn);
@@ -1029,6 +1051,11 @@
     if (!S.radarOn) { hazard = null; el.banner.hidden = true; }
     if (!S.aheadOn) { aheadInfo = null; el.ahead.hidden = true; }
   }
+  el.vehBtns.forEach(b => b.addEventListener('click', () => {
+    S.vehicle = b.dataset.veh; savePrefs(); renderPrefs();
+    if (S.lastPos) { updateLimit(S.lastPos); S.lastAnnouncedLimit = S.autoLimit; }
+    render();
+  }));
   el.tolBtns.forEach(b => b.addEventListener('click', () => { S.tolMode = b.dataset.tol; savePrefs(); renderPrefs(); render(); }));
   el.warnBtns.forEach(b => b.addEventListener('click', () => { S.warnMargin = +b.dataset.warn; savePrefs(); renderPrefs(); render(); }));
   el.btnRadar.addEventListener('click', () => { S.radarOn = !S.radarOn; savePrefs(); renderPrefs(); });
